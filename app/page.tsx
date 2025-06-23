@@ -206,7 +206,22 @@ export default function LanguageQuizGame() {
         }
 
         const { room, serverInfo, roomBackup } = await response.json()
-        setPlayers(room.players)
+        console.log("Poll room updates:", { players: room.players })
+
+        // Check if there's a host; if not, assign the last player as host
+        const hasHost = room.players.some((p: Player) => p.isHost)
+        let updatedPlayers = room.players
+        if (!hasHost && room.players.length > 0) {
+          const lastPlayer = room.players[room.players.length - 1]
+          console.log(`No host found, assigning last player as host: ${lastPlayer.name}`)
+          updatedPlayers = room.players.map((p: Player) =>
+            p.id === lastPlayer.id ? { ...p, isHost: true } : { ...p, isHost: false }
+          )
+          // Update server with new host
+          await apiCall("update-host", { newHostId: lastPlayer.id })
+        }
+
+        setPlayers(updatedPlayers)
         setConnectionError(null)
         setConsecutiveErrors(0)
         setLastSuccessfulPoll(Date.now())
@@ -216,11 +231,11 @@ export default function LanguageQuizGame() {
           setServerInfo(serverInfo)
         }
 
-        const updatedCurrentPlayer = room.players.find((p: Player) => p.id === currentPlayer?.id)
+        const updatedCurrentPlayer = updatedPlayers.find((p: Player) => p.id === currentPlayer?.id)
         if (updatedCurrentPlayer) {
           setCurrentPlayer({
             ...updatedCurrentPlayer,
-            isHost: currentPlayer?.isHost || updatedCurrentPlayer.isHost, // Preserve host status
+            isHost: currentPlayer?.isHost || updatedCurrentPlayer.isHost, // Preserve local host status
           })
         }
 
@@ -325,7 +340,7 @@ export default function LanguageQuizGame() {
     return result
   }
 
-  // Create room - Updated to use server player data
+  // Create room - Ensure creator is host
   const createRoom = async () => {
     if (!playerName.trim()) return
 
@@ -357,18 +372,21 @@ export default function LanguageQuizGame() {
       }
 
       console.log("Joining room...")
-      const joinResult = await apiCall("join", { name: playerName.trim() }, playerId, newRoomId)
+      const joinResult = await apiCall("join", { name: playerName.trim(), isHost: true }, playerId, newRoomId)
       console.log("Join result:", joinResult)
 
       if (joinResult?.room) {
         setRoomId(newRoomId)
         const serverPlayer = joinResult.room.players.find((p: Player) => p.id === playerId)
-        setCurrentPlayer(serverPlayer || player) // Use server player data, fallback to local
+        console.log("Server player data:", serverPlayer)
+        setCurrentPlayer(serverPlayer || player)
         setGameState("lobby")
         setIsConnected(true)
         setPlayers(joinResult.room.players)
         setConnectionError(null)
         setConsecutiveErrors(0)
+        // Explicitly set host on server
+        await apiCall("update-host", { newHostId: playerId })
         console.log("Room created successfully with players:", joinResult.room.players)
       } else {
         console.error("Failed to join room after creation")
@@ -599,6 +617,7 @@ export default function LanguageQuizGame() {
       canStartGame,
       playersWithLanguages,
       allPlayersWithLanguagesReady,
+      players,
     })
 
     return (
@@ -646,6 +665,7 @@ export default function LanguageQuizGame() {
                     <div className="flex items-center gap-2">
                       {player.isHost && <Crown className="w-4 h-4 text-yellow-500" />}
                       <span className="font-medium">{player.name}</span>
+                      {player.isHost && <span className="text-xs text-gray-500">(Host)</span>}
                     </div>
                     <div className="flex items-center gap-2">
                       {player.language && (
@@ -810,7 +830,7 @@ export default function LanguageQuizGame() {
                   </div>
                 ) : (
                   <div className="text-red-600">
-                    <p className="text-xl font-bold">Wrong answer! ❌</p>
+                    <p className="text-xl font-bold">Wrong answer!</p>
                     <p>The correct answer was: {currentQuestion.correctAnswer}</p>
                   </div>
                 )}
@@ -831,7 +851,7 @@ export default function LanguageQuizGame() {
             <div className="mx-auto w-16 h-16 bg-yellow-500 rounded-full flex items-center justify-center mb-4">
               <Trophy className="w-8 h-8 text-white" />
             </div>
-            <CardTitle className="text-2xl font-bold text-yellow-700">🎉 Congratulations! 🎉</CardTitle>
+            <CardTitle className="text-2xl font-bold text-yellow-700">🎉 Congratulations!</CardTitle>
             <CardDescription className="text-lg">
               {winner.name} wins with {winner.score} points!
             </CardDescription>
@@ -842,7 +862,7 @@ export default function LanguageQuizGame() {
               {players.map((player) => (
                 <div key={player.id} className="flex justify-between items-center mt-2">
                   <span>{player.name}</span>
-                  <Badge variant={player.id === winner.id ? "default" : "secondary"}>{player.score} pts</Badge>
+                  <Badge variant={player.id === winner.id ? "default" : "secondary"}>{player.score} pts</span>
                 </div>
               ))}
             </div>
