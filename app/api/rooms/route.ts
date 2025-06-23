@@ -29,36 +29,36 @@ async function ensureDbInitialized() {
   }
 }
 
-// Word database
+// Word database with Japanese (Romaji) added
 const WORD_DATABASE = [
-  { english: "Apple", french: "Pomme", german: "Apfel", russian: "яблоко" },
-  { english: "Car", french: "Voiture", german: "Auto", russian: "машина" },
-  { english: "House", french: "Maison", german: "Haus", russian: "дом" },
-  { english: "Water", french: "Eau", german: "Wasser", russian: "вода" },
-  { english: "Book", french: "Livre", german: "Buch", russian: "книга" },
-  { english: "Cat", french: "Chat", german: "Katze", russian: "кот" },
-  { english: "Dog", french: "Chien", german: "Hund", russian: "собака" },
-  { english: "Tree", french: "Arbre", german: "Baum", russian: "дерево" },
-  { english: "Sun", french: "Soleil", german: "Sonne", russian: "солнце" },
-  { english: "Moon", french: "Lune", german: "Mond", russian: "луна" },
-  { english: "Food", french: "Nourriture", german: "Essen", russian: "еда" },
-  { english: "Love", french: "Amour", german: "Liebe", russian: "любовь" },
-  { english: "Time", french: "Temps", german: "Zeit", russian: "время" },
-  { english: "Money", french: "Argent", german: "Geld", russian: "деньги" },
-  { english: "Friend", french: "Ami", german: "Freund", russian: "друг" },
-  { english: "Family", french: "Famille", german: "Familie", russian: "семья" },
-  { english: "School", french: "École", german: "Schule", russian: "школа" },
-  { english: "Work", french: "Travail", german: "Arbeit", russian: "работа" },
-  { english: "Music", french: "Musique", german: "Musik", russian: "музыка" },
-  { english: "Color", french: "Couleur", german: "Farbe", russian: "цвет" },
-  { english: "Red", french: "Rouge", german: "Rot", russian: "красный" },
-  { english: "Blue", french: "Bleu", german: "Blau", russian: "синий" },
-  { english: "Green", french: "Vert", german: "Grün", russian: "зелёный" },
-  { english: "Yellow", french: "Jaune", german: "Gelb", russian: "жёлтый" },
-  { english: "Black", french: "Noir", german: "Schwarz", russian: "чёрный" },
+  { english: "Apple", french: "Pomme", german: "Apfel", russian: "яблоко", japanese: "Ringo" },
+  { english: "Car", french: "Voiture", german: "Auto", russian: "машина", japanese: "Kuruma" },
+  { english: "House", french: "Maison", german: "Haus", russian: "дом", japanese: "Ie" },
+  { english: "Water", french: "Eau", german: "Wasser", russian: "вода", japanese: "Mizu" },
+  { english: "Book", french: "Livre", german: "Buch", russian: "книга", japanese: "Hon" },
+  { english: "Cat", french: "Chat", german: "Katze", russian: "кот", japanese: "Neko" },
+  { english: "Dog", french: "Chien", german: "Hund", russian: "собака", japanese: "Inu" },
+  { english: "Tree", french: "Arbre", german: "Baum", russian: "дерево", japanese: "Ki" },
+  { english: "Sun", french: "Soleil", german: "Sonne", russian: "солнце", japanese: "Taiyou" },
+  { english: "Moon", french: "Lune", german: "Mond", russian: "луна", japanese: "Tsuki" },
+  { english: "Food", french: "Nourriture", german: "Essen", russian: "еда", japanese: "Tabemono" },
+  { english: "Love", french: "Amour", german: "Liebe", russian: "любовь", japanese: "Ai" },
+  { english: "Time", french: "Temps", german: "Zeit", russian: "время", japanese: "Jikan" },
+  { english: "Money", french: "Argent", german: "Geld", russian: "деньги", japanese: "Okane" },
+  { english: "Friend", french: "Ami", german: "Freund", russian: "друг", japanese: "Tomodachi" },
+  { english: "Family", french: "Famille", german: "Familie", russian: "семья", japanese: "Kazoku" },
+  { english: "School", french: "École", german: "Schule", russian: "школа", japanese: "Gakkou" },
+  { english: "Work", french: "Travail", german: "Arbeit", russian: "работа", japanese: "Shigoto" },
+  { english: "Music", french: "Musique", german: "Musik", russian: "музыка", japanese: "Ongaku" },
+  { english: "Color", french: "Couleur", german: "Farbe", russian: "цвет", japanese: "Iro" },
+  { english: "Red", french: "Rouge", german: "Rot", russian: "красный", japanese: "Aka" },
+  { english: "Blue", french: "Bleu", german: "Blau", russian: "синий", japanese: "Ao" },
+  { english: "Green", french: "Vert", german: "Grün", russian: "зелёный", japanese: "Midori" },
+  { english: "Yellow", french: "Jaune", german: "Gelb", russian: "жёлтый", japanese: "Kiiro" },
+  { english: "Black", french: "Noir", german: "Schwarz", russian: "чёрный", japanese: "Kuro" },
 ];
 
-function generateQuestion(language: "french" | "german" | "russian") {
+function generateQuestion(language: "french" | "german" | "russian" | "japanese") {
   const randomWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)];
   const correctAnswer = randomWord[language];
 
@@ -251,7 +251,7 @@ export async function POST(request: NextRequest) {
 
           await updateRoom(roomId, {
             game_state: "playing",
-            question_count: 0, // Fixed typo from null to 0
+            question_count: 0,
           });
 
           // Generate questions for all players with languages
