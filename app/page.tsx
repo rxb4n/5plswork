@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Progress } from "../components/ui/progress"
 import { Users, Crown, Clock, Trophy, AlertTriangle, Wifi, WifiOff } from "lucide-react"
 
-type Language = "french" | "german" | "russian" | "japanese";
+type Language = "french" | "german" | "russian" | "japanese" | "spanish";
 type GameState = "home" | "lobby" | "playing" | "finished";
 
 interface Player {
@@ -891,6 +891,7 @@ export default function LanguageQuizGame() {
                     <SelectItem value="german">German</SelectItem>
                     <SelectItem value="russian">Russian</SelectItem>
                     <SelectItem value="japanese">Japanese (Romaji)</SelectItem>
+                    <SelectItem value="spanish">Spanish</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
