@@ -77,7 +77,6 @@ export default function LanguageQuizGame() {
       es.onerror = () => {
         setIsConnected(false)
         setConnectionError("Connection lost. Retrying...")
-        // Attempt to reconnect after 3 seconds
         setTimeout(() => {
           if (gameState !== "home") {
             connectEventSource(roomId, playerId)
@@ -92,7 +91,6 @@ export default function LanguageQuizGame() {
 
   const handleServerMessage = (message: any) => {
     // For now, we'll poll for updates instead of using SSE for simplicity
-    // In a real implementation, you'd handle different message types here
   }
 
   // Enhanced API call helper with better error handling
@@ -108,7 +106,7 @@ export default function LanguageQuizGame() {
         })
 
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
+        const timeoutId = setTimeout(() => controller.abort(), 15000)
 
         const response = await fetch("/api/rooms", {
           method: "POST",
@@ -124,7 +122,6 @@ export default function LanguageQuizGame() {
 
         clearTimeout(timeoutId)
 
-        // Check if response is JSON
         const contentType = response.headers.get("content-type")
         if (!contentType || !contentType.includes("application/json")) {
           const text = await response.text()
@@ -155,7 +152,6 @@ export default function LanguageQuizGame() {
           if (attempt === retries - 1) {
             return { error: result.error || "API call failed" }
           }
-          // Wait before retry
           await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)))
           continue
         }
@@ -179,7 +175,6 @@ export default function LanguageQuizGame() {
           setConsecutiveErrors((prev) => prev + 1)
           return { error: error.message || "Network error" }
         }
-        // Wait before retry
         await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)))
       }
     }
@@ -191,7 +186,7 @@ export default function LanguageQuizGame() {
 
     try {
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
 
       const response = await fetch(`/api/rooms?roomId=${roomId}`, {
         headers: {
@@ -203,7 +198,6 @@ export default function LanguageQuizGame() {
       clearTimeout(timeoutId)
 
       if (response.ok) {
-        // Check if response is JSON
         const contentType = response.headers.get("content-type")
         if (!contentType || !contentType.includes("application/json")) {
           const text = await response.text()
@@ -224,17 +218,19 @@ export default function LanguageQuizGame() {
 
         const updatedCurrentPlayer = room.players.find((p: Player) => p.id === currentPlayer?.id)
         if (updatedCurrentPlayer) {
-          setCurrentPlayer(updatedCurrentPlayer)
+          setCurrentPlayer({
+            ...updatedCurrentPlayer,
+            isHost: currentPlayer?.isHost || updatedCurrentPlayer.isHost, // Preserve host status
+          })
+        }
 
-          // Update current question from the player's individual question
-          if (room.gameState === "playing" && updatedCurrentPlayer.currentQuestion) {
-            if (!currentQuestion || currentQuestion.english !== updatedCurrentPlayer.currentQuestion.english) {
-              setCurrentQuestion(updatedCurrentPlayer.currentQuestion)
-              setTimeLeft(10)
-              setSelectedAnswer(null)
-              setShowResult(false)
-              setGameState("playing")
-            }
+        if (room.gameState === "playing" && updatedCurrentPlayer.currentQuestion) {
+          if (!currentQuestion || currentQuestion.english !== updatedCurrentPlayer.currentQuestion.english) {
+            setCurrentQuestion(updatedCurrentPlayer.currentQuestion)
+            setTimeLeft(10)
+            setSelectedAnswer(null)
+            setShowResult(false)
+            setGameState("playing")
           }
         }
 
@@ -269,7 +265,6 @@ export default function LanguageQuizGame() {
         setConnectionError(`Connection issues: ${error.message}`)
       }
 
-      // If too many consecutive errors, suggest going back to home
       if (consecutiveErrors > 5) {
         setConnectionError("Too many connection errors. Please try creating a new room.")
       }
@@ -282,7 +277,6 @@ export default function LanguageQuizGame() {
 
     setConnectionError("Attempting to recover room...")
 
-    // Try to rejoin the room
     const result = await apiCall("join", { name: currentPlayer.name }, currentPlayer.id)
     if (result?.room) {
       setPlayers(result.room.players)
@@ -299,9 +293,8 @@ export default function LanguageQuizGame() {
   // Adaptive polling with circuit breaker
   useEffect(() => {
     if (gameState !== "home") {
-      // Slow down polling if there are consecutive errors
       const baseInterval = gameState === "playing" ? 2000 : 3000
-      const errorMultiplier = Math.min(consecutiveErrors * 0.5 + 1, 3) // Max 3x slower
+      const errorMultiplier = Math.min(consecutiveErrors * 0.5 + 1, 3)
       const interval = baseInterval * errorMultiplier
 
       console.log(`Polling every ${interval}ms (errors: ${consecutiveErrors})`)
@@ -316,7 +309,7 @@ export default function LanguageQuizGame() {
     if (gameState === "playing" && currentPlayer) {
       const pingInterval = setInterval(async () => {
         await apiCall("ping", {}, currentPlayer.id)
-      }, 30000) // Ping every 30 seconds
+      }, 30000)
 
       return () => clearInterval(pingInterval)
     }
@@ -332,7 +325,7 @@ export default function LanguageQuizGame() {
     return result
   }
 
-  // Create room - Fixed to pass roomId directly
+  // Create room - Updated to use server player data
   const createRoom = async () => {
     if (!playerName.trim()) return
 
@@ -353,7 +346,6 @@ export default function LanguageQuizGame() {
     try {
       setConnectionError("Creating room...")
 
-      // Create room on server first - pass newRoomId directly
       console.log("Creating room...")
       const createResult = await apiCall("create", {}, playerId, newRoomId)
       console.log("Create result:", createResult)
@@ -364,15 +356,14 @@ export default function LanguageQuizGame() {
         return
       }
 
-      // Then join the room - pass newRoomId directly
       console.log("Joining room...")
       const joinResult = await apiCall("join", { name: playerName.trim() }, playerId, newRoomId)
       console.log("Join result:", joinResult)
 
       if (joinResult?.room) {
-        // Only set state after successful API calls
         setRoomId(newRoomId)
-        setCurrentPlayer(player)
+        const serverPlayer = joinResult.room.players.find((p: Player) => p.id === playerId)
+        setCurrentPlayer(serverPlayer || player) // Use server player data, fallback to local
         setGameState("lobby")
         setIsConnected(true)
         setPlayers(joinResult.room.players)
@@ -389,12 +380,12 @@ export default function LanguageQuizGame() {
     }
   }
 
-  // Join room - Fixed to use roomId from input
+  // Join room
   const joinRoom = async () => {
     if (!playerName.trim() || !roomId.trim()) return
 
     const playerId = `player-${Date.now()}`
-    const targetRoomId = roomId.trim() // Use the roomId from input
+    const targetRoomId = roomId.trim()
 
     console.log(`Joining room ${targetRoomId} with player ${playerId}`)
 
@@ -410,7 +401,6 @@ export default function LanguageQuizGame() {
     try {
       setConnectionError("Joining room...")
 
-      // Join room on server - pass targetRoomId directly
       console.log("Attempting to join room...")
       const result = await apiCall("join", { name: playerName.trim() }, playerId, targetRoomId)
       console.log("Join result:", result)
@@ -422,7 +412,6 @@ export default function LanguageQuizGame() {
       }
 
       if (result.room) {
-        // Only set state after successful join
         setCurrentPlayer(player)
         setGameState("lobby")
         setIsConnected(true)
@@ -430,7 +419,6 @@ export default function LanguageQuizGame() {
         setConnectionError(null)
         setConsecutiveErrors(0)
 
-        // Update current player with server data
         const serverPlayer = result.room.players.find((p: Player) => p.id === playerId)
         if (serverPlayer) {
           setCurrentPlayer(serverPlayer)
@@ -601,10 +589,17 @@ export default function LanguageQuizGame() {
 
   // Lobby Screen
   if (gameState === "lobby") {
-    // Check if players with languages are ready
     const playersWithLanguages = players.filter((p) => p.language)
     const allPlayersWithLanguagesReady = playersWithLanguages.length > 0 && playersWithLanguages.every((p) => p.ready)
     const canStartGame = currentPlayer?.isHost && allPlayersWithLanguagesReady
+
+    console.log("Lobby debug:", {
+      currentPlayer,
+      isHost: currentPlayer?.isHost,
+      canStartGame,
+      playersWithLanguages,
+      allPlayersWithLanguagesReady,
+    })
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
@@ -622,6 +617,9 @@ export default function LanguageQuizGame() {
               <CardDescription>Players in room</CardDescription>
             </CardHeader>
             <CardContent>
+              <div className="text-sm mb-4">
+                Debug: Current player is {currentPlayer?.isHost ? "Host" : "Not Host"}
+              </div>
               {connectionError && (
                 <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm mb-4">
                   <div className="flex items-center gap-2 mb-2">
@@ -731,7 +729,6 @@ export default function LanguageQuizGame() {
             </div>
           )}
 
-          {/* Score and Timer with Player Scores */}
           <div className="flex justify-between items-start">
             <div className="flex items-center gap-4">
               <Badge className="text-lg px-3 py-1">Your Score: {currentPlayer?.score || 0}</Badge>
@@ -740,7 +737,6 @@ export default function LanguageQuizGame() {
               </Badge>
             </div>
 
-            {/* Player Scores Display */}
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2 mb-2">
                 <Clock className="w-5 h-5" />
@@ -764,7 +760,6 @@ export default function LanguageQuizGame() {
 
           <Progress value={(10 - timeLeft) * 10} className="h-2" />
 
-          {/* Question */}
           <Card>
             <CardHeader className="text-center">
               <CardTitle className="text-3xl font-bold text-blue-700">{currentQuestion.english}</CardTitle>
@@ -772,7 +767,6 @@ export default function LanguageQuizGame() {
             </CardHeader>
           </Card>
 
-          {/* Answer Options */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {currentQuestion.options.map((option, index) => {
               let buttonClass = "h-16 text-lg font-medium"
@@ -801,7 +795,6 @@ export default function LanguageQuizGame() {
             })}
           </div>
 
-          {/* Result Message */}
           {showResult && (
             <Card className="text-center">
               <CardContent className="pt-6">
