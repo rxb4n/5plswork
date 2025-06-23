@@ -29,7 +29,7 @@ async function ensureDbInitialized() {
   }
 }
 
-// Word database with Spanish added
+// Word database
 const WORD_DATABASE = [
   { english: "Apple", french: "Pomme", german: "Apfel", russian: "яблоко", japanese: "Ringo", spanish: "Manzana" },
   { english: "Car", french: "Voiture", german: "Auto", russian: "машина", japanese: "Kuruma", spanish: "Coche" },
@@ -58,6 +58,9 @@ const WORD_DATABASE = [
   { english: "Black", french: "Noir", german: "Schwarz", russian: "чёрный", japanese: "Kuro", spanish: "Negro" },
 ];
 
+// Counter for generating unique question IDs
+let questionCounter = 0;
+
 function generateQuestion(language: "french" | "german" | "russian" | "japanese" | "spanish") {
   const randomWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)];
   const correctAnswer = randomWord[language];
@@ -74,6 +77,7 @@ function generateQuestion(language: "french" | "german" | "russian" | "japanese"
   const options = [correctAnswer, ...wrongAnswers].sort(() => Math.random() - 0.5);
 
   return {
+    questionId: `q-${questionCounter++}`, // Unique ID for each question
     english: randomWord.english,
     correctAnswer,
     options,
