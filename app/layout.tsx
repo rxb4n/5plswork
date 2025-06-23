@@ -6,8 +6,8 @@ import "./globals.css"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Language Quiz Game",
-  description: "Test your language skills with friends in this multiplayer quiz game!",
+  title: "dead",
+  description: "if ts doesnt work im ending it all chat",
 }
 
 export default function RootLayout({
