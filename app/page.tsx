@@ -60,7 +60,7 @@ export default function LanguageQuizGame() {
   const [showRecoveryOption, setShowRecoveryOption] = useState(false);
   const [isStartingGame, setIsStartingGame] = useState(false);
   const [startGameError, setStartGameError] = useState<string | null>(null);
-  const [creatorId, setCreatorId] = useState<string | null>(null); // Track room creator
+  const [creatorId, setCreatorId] = useState<string | null>(null);
 
   // Server-Sent Events connection
   const connectEventSource = useCallback(
@@ -219,7 +219,11 @@ export default function LanguageQuizGame() {
         }
 
         const { room, serverInfo, roomBackup } = await response.json();
-        console.log("Poll room updates:", { gameState: room.gameState, players: room.players });
+        console.log("Poll room updates:", {
+          gameState: room.gameState,
+          players: room.players,
+          currentPlayerQuestion: room.players.find((p: Player) => p.id === currentPlayer?.id)?.currentQuestion,
+        });
 
         // Enforce creator as host
         const updatedPlayers = room.players.map((p: Player) => ({
@@ -245,15 +249,17 @@ export default function LanguageQuizGame() {
           });
         }
 
-        // Detect game start
+        // Transition to playing state even if currentQuestion is missing
         if (room.gameState === "playing") {
-          console.log("Game state changed to playing:", updatedCurrentPlayer);
+          console.log("Game state changed to playing:", { updatedCurrentPlayer, hasQuestion: !!updatedCurrentPlayer?.currentQuestion });
           setGameState("playing");
           if (updatedCurrentPlayer?.currentQuestion) {
             setCurrentQuestion(updatedCurrentPlayer.currentQuestion);
             setTimeLeft(10);
             setSelectedAnswer(null);
             setShowResult(false);
+          } else {
+            console.log("No currentQuestion for player, waiting for server update");
           }
         }
 
@@ -321,7 +327,7 @@ export default function LanguageQuizGame() {
   // Adaptive polling with circuit breaker
   useEffect(() => {
     if (gameState !== "home") {
-      const baseInterval = gameState === "playing" ? 2000 : 3000;
+      const baseInterval = gameState === "playing" ? 1000 : 3000; // Faster polling in playing state
       const errorMultiplier = Math.min(consecutiveErrors * 0.5 + 1, 3);
       const interval = baseInterval * errorMultiplier;
 
@@ -390,12 +396,12 @@ export default function LanguageQuizGame() {
 
       if (joinResult?.room) {
         setRoomId(newRoomId);
-        setCreatorId(playerId); // Set creatorId
+        setCreatorId(playerId);
         const serverPlayer = joinResult.room.players.find((p: Player) => p.id === playerId);
         console.log("Server player data:", serverPlayer);
         setCurrentPlayer({
           ...(serverPlayer || player),
-          isHost: true, // Enforce creator as host
+          isHost: true,
         });
         setGameState("lobby");
         setIsConnected(true);
@@ -555,7 +561,7 @@ export default function LanguageQuizGame() {
     }
   };
 
-  // Start game with error handling
+  // Start game with immediate polling
   const startGame = async () => {
     if (!currentPlayer || currentPlayer.id !== creatorId) {
       console.log("Start game blocked: Current player is not creator", { currentPlayer, creatorId });
@@ -575,6 +581,8 @@ export default function LanguageQuizGame() {
       setStartGameError(result.error);
     } else {
       console.log("Start game API call successful:", result);
+      // Immediately poll to catch game state change
+      await pollRoomUpdates();
     }
   };
 
@@ -590,13 +598,13 @@ export default function LanguageQuizGame() {
 
   // Timer effect
   useEffect(() => {
-    if (gameState === "playing" && timeLeft > 0 && !selectedAnswer) {
+    if (gameState === "playing" && timeLeft > 0 && !selectedAnswer && currentQuestion) {
       const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
       return () => clearTimeout(timer);
-    } else if (timeLeft === 0 && !selectedAnswer && gameState === "playing") {
+    } else if (timeLeft === 0 && !selectedAnswer && gameState === "playing" && currentQuestion) {
       setShowResult(true);
     }
-  }, [gameState, timeLeft, selectedAnswer]);
+  }, [gameState, timeLeft, selectedAnswer, currentQuestion]);
 
   // Restart game
   const restartGame = async () => {
@@ -820,7 +828,7 @@ export default function LanguageQuizGame() {
   }
 
   // Game Screen
-  if (gameState === "playing" && currentQuestion) {
+  if (gameState === "playing") {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-100 p-4">
         <div className="max-w-2xl mx-auto space-y-6">
@@ -838,93 +846,109 @@ export default function LanguageQuizGame() {
             </div>
           )}
 
-          <div className="flex justify-between items-start">
-            <div className="flex items-center gap-4">
-              <Badge className="text-lg px-3 py-1">Your Score: {currentPlayer?.score || 0}</Badge>
-              <Badge variant="outline" className="text-lg px-3 py-1">
-                Target: 100
-              </Badge>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2 mb-2">
-                <Clock className="w-5 h-5" />
-                <span className="text-xl font-bold">{timeLeft}s</span>
-              </div>
-              <div className="space-y-1">
-                {players.map((player) => (
-                  <div key={player.id} className="flex items-center gap-2 text-sm">
-                    {player.isHost && <Crown className="w-3 h-3 text-yellow-500" />}
-                    <span className={`font-medium ${player.id === currentPlayer?.id ? "text-blue-600" : ""}`}>
-                      {player.name}
-                    </span>
-                    <Badge variant={player.id === currentPlayer?.id ? "default" : "secondary"} className="text-xs">
-                      {player.score}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <Progress value={(10 - timeLeft) * 10} className="h-2" />
-
-          <Card>
-            <CardHeader className="text-center">
-              <CardTitle className="text-3xl font-bold text-blue-700">{currentQuestion.english}</CardTitle>
-              <CardDescription>Select the correct translation in {currentPlayer?.language}</CardDescription>
-            </CardHeader>
-          </Card>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {currentQuestion.options.map((option, index) => {
-              let buttonClass = "h-16 text-lg font-medium";
-
-              if (showResult) {
-                if (option === currentQuestion.correctAnswer) {
-                  buttonClass += " bg-green-500 hover:bg-green-500 text-white";
-                } else if (option === selectedAnswer && option !== currentQuestion.correctAnswer) {
-                  buttonClass += " bg-red-500 hover:bg-red-500 text-white";
-                } else {
-                  buttonClass += " opacity-50";
-                }
-              }
-
-              return (
-                <Button
-                  key={index}
-                  onClick={() => selectAnswer(option)}
-                  disabled={!!selectedAnswer || timeLeft === 0}
-                  className={buttonClass}
-                  variant={showResult ? "default" : "outline"}
-                >
-                  {option}
-                </Button>
-              );
-            })}
-          </div>
-
-          {showResult && (
+          {!currentQuestion ? (
             <Card className="text-center">
-              <CardContent className="pt-6">
-                {selectedAnswer === currentQuestion.correctAnswer ? (
-                  <div className="text-green-600">
-                    <p className="text-xl font-bold">Correct! 🎉</p>
-                    <p>You earned {Math.max(1, 10 - (10 - timeLeft))} points!</p>
-                  </div>
-                ) : timeLeft === 0 ? (
-                  <div className="text-orange-600">
-                    <p className="text-xl font-bold">Time's up! ⏰</p>
-                    <p>The correct answer was: {currentQuestion.correctAnswer}</p>
-                  </div>
-                ) : (
-                  <div className="text-red-600">
-                    <p className="text-xl font-bold">Wrong answer!</p>
-                    <p>The correct answer was: {currentQuestion.correctAnswer}</p>
-                  </div>
-                )}
+              <CardHeader>
+                <CardTitle>Loading Question...</CardTitle>
+                <CardDescription>Please wait while the game prepares the next question.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex justify-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                </div>
               </CardContent>
             </Card>
+          ) : (
+            <>
+              <div className="flex justify-between items-start">
+                <div className="flex items-center gap-4">
+                  <Badge className="text-lg px-3 py-1">Your Score: {currentPlayer?.score || 0}</Badge>
+                  <Badge variant="outline" className="text-lg px-3 py-1">
+                    Target: 100
+                  </Badge>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Clock className="w-5 h-5" />
+                    <span className="text-xl font-bold">{timeLeft}s</span>
+                  </div>
+                  <div className="space-y-1">
+                    {players.map((player) => (
+                      <div key={player.id} className="flex items-center gap-2 text-sm">
+                        {player.isHost && <Crown className="w-3 h-3 text-yellow-500" />}
+                        <span className={`font-medium ${player.id === currentPlayer?.id ? "text-blue-600" : ""}`}>
+                          {player.name}
+                        </span>
+                        <Badge variant={player.id === currentPlayer?.id ? "default" : "secondary"} className="text-xs">
+                          {player.score}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <Progress value={(10 - timeLeft) * 10} className="h-2" />
+
+              <Card>
+                <CardHeader className="text-center">
+                  <CardTitle className="text-3xl font-bold text-blue-700">{currentQuestion.english}</CardTitle>
+                  <CardDescription>Select the correct translation in {currentPlayer?.language}</CardDescription>
+                </CardHeader>
+              </Card>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {currentQuestion.options.map((option, index) => {
+                  let buttonClass = "h-16 text-lg font-medium";
+
+                  if (showResult) {
+                    if (option === currentQuestion.correctAnswer) {
+                      buttonClass += " bg-green-500 hover:bg-green-500 text-white";
+                    } else if (option === selectedAnswer && option !== currentQuestion.correctAnswer) {
+                      buttonClass += " bg-red-500 hover:bg-red-500 text-white";
+                    } else {
+                      buttonClass += " opacity-50";
+                    }
+                  }
+
+                  return (
+                    <Button
+                      key={index}
+                      onClick={() => selectAnswer(option)}
+                      disabled={!!selectedAnswer || timeLeft === 0}
+                      className={buttonClass}
+                      variant={showResult ? "default" : "outline"}
+                    >
+                      {option}
+                    </Button>
+                  );
+                })}
+              </div>
+
+              {showResult && (
+                <Card className="text-center">
+                  <CardContent className="pt-6">
+                    {selectedAnswer === currentQuestion.correctAnswer ? (
+                      <div className="text-green-600">
+                        <p className="text-xl font-bold">Correct! 🎉</p>
+                        <p>You earned {Math.max(1, 10 - (10 - timeLeft))} points!</p>
+                      </div>
+                    ) : timeLeft === 0 ? (
+                      <div className="text-orange-600">
+                        <p className="text-xl font-bold">Time's up! ⏰</p>
+                        <p>The correct answer was: {currentQuestion.correctAnswer}</p>
+                      </div>
+                    ) : (
+                      <div className="text-red-600">
+                        <p className="text-xl font-bold">Wrong answer!</p>
+                        <p>The correct answer was: {currentQuestion.correctAnswer}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </>
           )}
         </div>
       </div>
