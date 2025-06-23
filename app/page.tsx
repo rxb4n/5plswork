@@ -272,6 +272,7 @@ export default function LanguageQuizGame() {
           if (updatedCurrentPlayer?.currentQuestion) {
             // Only update question and reset timer if questionId has changed
             if (updatedCurrentPlayer.currentQuestion.questionId !== currentQuestionId) {
+              console.log(`Resetting timer to 10s for new question ${updatedCurrentPlayer.currentQuestion.questionId}`);
               setCurrentQuestion(updatedCurrentPlayer.currentQuestion);
               setCurrentQuestionId(updatedCurrentPlayer.currentQuestion.questionId);
               setTimeLeft(10);
@@ -365,7 +366,9 @@ export default function LanguageQuizGame() {
 
   // Timer effect
   useEffect(() => {
+    console.log("Timer effect triggered:", { gameState, timeLeft, selectedAnswer, currentQuestion, currentQuestionId });
     if (gameState === "playing" && timeLeft > 0 && !selectedAnswer && currentQuestion) {
+      console.log(`Starting timer for question ${currentQuestionId} at ${timeLeft}s`);
       const timer = setInterval(() => {
         setTimeLeft((prev) => {
           const newTime = prev - 1;
@@ -373,13 +376,16 @@ export default function LanguageQuizGame() {
           return newTime;
         });
       }, 1000);
-      return () => clearInterval(timer);
+      return () => {
+        console.log(`Cleaning up timer for question ${currentQuestionId}`);
+        clearInterval(timer);
+      };
     } else if (timeLeft === 0 && !selectedAnswer && gameState === "playing" && currentQuestion) {
       console.log(`Time's up for question ${currentQuestionId}`);
       setShowResult(true);
-      selectAnswer(""); // Submit empty answer for timeout
+      selectAnswer("");
     }
-  }, [gameState, timeLeft, selectedAnswer, currentQuestion, currentQuestionId]);
+  }, [gameState, selectedAnswer, currentQuestion, currentQuestionId]);
 
   // Generate random room ID
   const generateRoomId = () => {
@@ -604,6 +610,17 @@ export default function LanguageQuizGame() {
       for (let i = 0; i < 5; i++) {
         await new Promise((resolve) => setTimeout(resolve, i * 1000));
         await pollRoomUpdates();
+        const updatedPlayers = players;
+        const newQuestion = updatedPlayers.find((p: Player) => p.id === currentPlayer.id)?.currentQuestion;
+        if (newQuestion) {
+          console.log(`Initial question set after start: ${newQuestion.questionId}`);
+          setCurrentQuestion(newQuestion);
+          setCurrentQuestionId(newQuestion.questionId);
+          setTimeLeft(10);
+          setSelectedAnswer(null);
+          setShowResult(false);
+          break;
+        }
       }
     }
   };
@@ -628,12 +645,12 @@ export default function LanguageQuizGame() {
           isHost: updatedPlayer.id === creatorId,
         });
         if (updatedPlayer.currentQuestion) {
+          console.log(`Setting new question after answer: ${updatedPlayer.currentQuestion.questionId}`);
           setCurrentQuestion(updatedPlayer.currentQuestion);
           setCurrentQuestionId(updatedPlayer.currentQuestion.questionId);
           setTimeLeft(10);
           setSelectedAnswer(null);
           setShowResult(false);
-          console.log(`New question after answer: ${updatedPlayer.currentQuestion.questionId}`);
         }
       }
       setPlayers(normalizedRoom.players);
@@ -1010,7 +1027,7 @@ export default function LanguageQuizGame() {
               {players.map((player) => (
                 <div key={player.id} className="flex justify-between items-center mt-2">
                   <span>{player.name}</span>
-                  <Badge variant={player.id === winner.id ? "default" : "secondary"}>{player.score} pts</Badge>
+                  <Badge variant={player.id === winner.id ? "default" : "secondary"}>{player.score} pts</span>
                 </div>
               ))}
             </div>
