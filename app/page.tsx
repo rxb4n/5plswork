@@ -1,5 +1,6 @@
 "use client"
 
+import React from "react" // Explicit import for JSX compatibility
 import { useState, useEffect, useCallback } from "react"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
@@ -217,8 +218,6 @@ export default function LanguageQuizGame() {
           updatedPlayers = room.players.map((p: Player) =>
             p.id === lastPlayer.id ? { ...p, isHost: true } : { ...p, isHost: false }
           )
-          // Update server with new host
-          await apiCall("update-host", { newHostId: lastPlayer.id })
         }
 
         setPlayers(updatedPlayers)
@@ -235,7 +234,7 @@ export default function LanguageQuizGame() {
         if (updatedCurrentPlayer) {
           setCurrentPlayer({
             ...updatedCurrentPlayer,
-            isHost: currentPlayer?.isHost || updatedCurrentPlayer.isHost, // Preserve local host status
+            isHost: currentPlayer?.isHost || updatedCurrentPlayer.isHost,
           })
         }
 
@@ -340,7 +339,7 @@ export default function LanguageQuizGame() {
     return result
   }
 
-  // Create room - Ensure creator is host
+  // Create room
   const createRoom = async () => {
     if (!playerName.trim()) return
 
@@ -385,8 +384,6 @@ export default function LanguageQuizGame() {
         setPlayers(joinResult.room.players)
         setConnectionError(null)
         setConsecutiveErrors(0)
-        // Explicitly set host on server
-        await apiCall("update-host", { newHostId: playerId })
         console.log("Room created successfully with players:", joinResult.room.players)
       } else {
         console.error("Failed to join room after creation")
@@ -862,7 +859,7 @@ export default function LanguageQuizGame() {
               {players.map((player) => (
                 <div key={player.id} className="flex justify-between items-center mt-2">
                   <span>{player.name}</span>
-                  <Badge variant={player.id === winner.id ? "default" : "secondary"}>{player.score} pts</span>
+                  <Badge variant={player.id === winner.id ? "default" : "secondary"}>{player.score} pts</Badge>
                 </div>
               ))}
             </div>
