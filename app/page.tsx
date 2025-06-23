@@ -1027,11 +1027,10 @@ export default function LanguageQuizGame() {
               {players.map((player) => (
                 <div key={player.id} className="flex justify-between items-center mt-2">
                   <span>{player.name}</span>
-                  <Badge variant={player.id === winner.id ? "default" : "secondary"}>{player.score} pts</span>
+                  <Badge variant={player.id === winner.id ? "default" : "secondary"}>{player.score} pts</Badge>
                 </div>
               ))}
             </div>
-
             {currentPlayer?.id === creatorId && (
               <Button onClick={restartGame} className="w-full">
                 Play Again
