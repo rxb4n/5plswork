@@ -59,7 +59,8 @@ export default function LanguageQuizGame() {
   const [roomBackup, setRoomBackup] = useState<string | null>(null);
   const [showRecoveryOption, setShowRecoveryOption] = useState(false);
   const [isStartingGame, setIsStartingGame] = useState(false);
-  const [startGameError, setStartGameError] = useState<string | null>(null); // New state for start game error
+  const [startGameError, setStartGameError] = useState<string | null>(null);
+  const [creatorId, setCreatorId] = useState<string | null>(null); // Track room creator
 
   // Server-Sent Events connection
   const connectEventSource = useCallback(
@@ -152,7 +153,7 @@ export default function LanguageQuizGame() {
           } else if (response.status === 500) {
             setConnectionError(`Server error: ${result.error || "Internal server error"}`);
           } else if (action === "start-game") {
-            setStartGameError(errorMsg); // Capture start-game specific error
+            setStartGameError(errorMsg);
           }
 
           if (attempt === retries - 1) {
@@ -165,7 +166,7 @@ export default function LanguageQuizGame() {
         setConnectionError(null);
         setConsecutiveErrors(0);
         setShowRecoveryOption(false);
-        setStartGameError(null); // Clear start game error on success
+        setStartGameError(null);
         return result;
       } catch (error) {
         console.error(`API call failed (attempt ${attempt + 1}):`, error);
@@ -180,7 +181,7 @@ export default function LanguageQuizGame() {
         }
 
         if (action === "start-game") {
-          setStartGameError(errorMsg); // Capture start-game specific error
+          setStartGameError(errorMsg);
         }
 
         if (attempt === retries - 1) {
@@ -220,16 +221,11 @@ export default function LanguageQuizGame() {
         const { room, serverInfo, roomBackup } = await response.json();
         console.log("Poll room updates:", { gameState: room.gameState, players: room.players });
 
-        // Check if there's a host; if not, assign the last player as host
-        const hasHost = room.players.some((p: Player) => p.isHost);
-        let updatedPlayers = room.players;
-        if (!hasHost && room.players.length > 0) {
-          const lastPlayer = room.players[room.players.length - 1];
-          console.log(`No host found, assigning last player as host: ${lastPlayer.name}`);
-          updatedPlayers = room.players.map((p: Player) =>
-            p.id === lastPlayer.id ? { ...p, isHost: true } : { ...p, isHost: false }
-          );
-        }
+        // Enforce creator as host
+        const updatedPlayers = room.players.map((p: Player) => ({
+          ...p,
+          isHost: p.id === creatorId,
+        }));
 
         setPlayers(updatedPlayers);
         setConnectionError(null);
@@ -245,11 +241,11 @@ export default function LanguageQuizGame() {
         if (updatedCurrentPlayer) {
           setCurrentPlayer({
             ...updatedCurrentPlayer,
-            isHost: currentPlayer?.isHost || updatedCurrentPlayer.isHost,
+            isHost: updatedCurrentPlayer.id === creatorId,
           });
         }
 
-        // Relaxed condition to detect game start
+        // Detect game start
         if (room.gameState === "playing") {
           console.log("Game state changed to playing:", updatedCurrentPlayer);
           setGameState("playing");
@@ -296,7 +292,7 @@ export default function LanguageQuizGame() {
         setConnectionError("Too many connection errors. Please try creating a new room.");
       }
     }
-  }, [roomId, gameState, currentPlayer, currentQuestion, consecutiveErrors]);
+  }, [roomId, gameState, currentPlayer, currentQuestion, consecutiveErrors, creatorId]);
 
   // Attempt room recovery
   const attemptRoomRecovery = async () => {
@@ -306,7 +302,12 @@ export default function LanguageQuizGame() {
 
     const result = await apiCall("join", { name: currentPlayer.name }, currentPlayer.id);
     if (result?.room) {
-      setPlayers(result.room.players);
+      setPlayers(
+        result.room.players.map((p: Player) => ({
+          ...p,
+          isHost: p.id === creatorId,
+        })),
+      );
       setConnectionError("Room recovered successfully!");
       setShowRecoveryOption(false);
       setTimeout(() => setConnectionError(null), 3000);
@@ -389,12 +390,21 @@ export default function LanguageQuizGame() {
 
       if (joinResult?.room) {
         setRoomId(newRoomId);
+        setCreatorId(playerId); // Set creatorId
         const serverPlayer = joinResult.room.players.find((p: Player) => p.id === playerId);
         console.log("Server player data:", serverPlayer);
-        setCurrentPlayer(serverPlayer || player);
+        setCurrentPlayer({
+          ...(serverPlayer || player),
+          isHost: true, // Enforce creator as host
+        });
         setGameState("lobby");
         setIsConnected(true);
-        setPlayers(joinResult.room.players);
+        setPlayers(
+          joinResult.room.players.map((p: Player) => ({
+            ...p,
+            isHost: p.id === playerId,
+          })),
+        );
         setConnectionError(null);
         setConsecutiveErrors(0);
         console.log("Room created successfully with players:", joinResult.room.players);
@@ -440,16 +450,27 @@ export default function LanguageQuizGame() {
       }
 
       if (result.room) {
-        setCurrentPlayer(player);
+        setCurrentPlayer({
+          ...player,
+          isHost: playerId === creatorId,
+        });
         setGameState("lobby");
         setIsConnected(true);
-        setPlayers(result.room.players);
+        setPlayers(
+          result.room.players.map((p: Player) => ({
+            ...p,
+            isHost: p.id === creatorId,
+          })),
+        );
         setConnectionError(null);
         setConsecutiveErrors(0);
 
         const serverPlayer = result.room.players.find((p: Player) => p.id === playerId);
         if (serverPlayer) {
-          setCurrentPlayer(serverPlayer);
+          setCurrentPlayer({
+            ...serverPlayer,
+            isHost: playerId === creatorId,
+          });
           console.log("Successfully joined room with players:", result.room.players);
         }
       }
@@ -479,17 +500,31 @@ export default function LanguageQuizGame() {
     setConsecutiveErrors(0);
     setServerInfo(null);
     setStartGameError(null);
+    setCreatorId(null);
   };
 
   // Update player language
   const updateLanguage = async (language: Language) => {
     if (!currentPlayer) return;
+
+    console.log(`Updating language for player ${currentPlayer.id} to ${language}`);
+    const isCreator = currentPlayer.id === creatorId;
     const result = await apiCall("update-language", { language });
+
     if (result?.room) {
-      setPlayers(result.room.players);
+      setPlayers(
+        result.room.players.map((p: Player) => ({
+          ...p,
+          isHost: p.id === creatorId,
+        })),
+      );
       const updatedPlayer = result.room.players.find((p: Player) => p.id === currentPlayer.id);
       if (updatedPlayer) {
-        setCurrentPlayer(updatedPlayer);
+        setCurrentPlayer({
+          ...updatedPlayer,
+          isHost: isCreator,
+        });
+        console.log(`Language updated for player ${currentPlayer.id}, isHost preserved: ${isCreator}`);
       }
     }
   };
@@ -497,25 +532,38 @@ export default function LanguageQuizGame() {
   // Toggle ready status
   const toggleReady = async () => {
     if (!currentPlayer || !currentPlayer.language) return;
+
+    console.log(`Toggling ready for player ${currentPlayer.id}`);
+    const isCreator = currentPlayer.id === creatorId;
     const result = await apiCall("toggle-ready");
+
     if (result?.room) {
-      setPlayers(result.room.players);
+      setPlayers(
+        result.room.players.map((p: Player) => ({
+          ...p,
+          isHost: p.id === creatorId,
+        })),
+      );
       const updatedPlayer = result.room.players.find((p: Player) => p.id === currentPlayer.id);
       if (updatedPlayer) {
-        setCurrentPlayer(updatedPlayer);
+        setCurrentPlayer({
+          ...updatedPlayer,
+          isHost: isCreator,
+        });
+        console.log(`Ready toggled for player ${currentPlayer.id}, isHost preserved: ${isCreator}`);
       }
     }
   };
 
   // Start game with error handling
   const startGame = async () => {
-    if (!currentPlayer?.isHost) {
-      console.log("Start game blocked: Current player is not host", { currentPlayer });
-      setStartGameError("Only the host can start the game.");
+    if (!currentPlayer || currentPlayer.id !== creatorId) {
+      console.log("Start game blocked: Current player is not creator", { currentPlayer, creatorId });
+      setStartGameError("Only the room creator can start the game.");
       return;
     }
 
-    console.log("Attempting to start game", { playerId: currentPlayer.id, isHost: currentPlayer.isHost });
+    console.log("Attempting to start game", { playerId: currentPlayer.id, creatorId });
     setIsStartingGame(true);
     setStartGameError(null);
 
@@ -552,7 +600,7 @@ export default function LanguageQuizGame() {
 
   // Restart game
   const restartGame = async () => {
-    if (!currentPlayer?.isHost) return;
+    if (!currentPlayer || currentPlayer.id !== creatorId) return;
     await apiCall("restart");
   };
 
@@ -637,11 +685,12 @@ export default function LanguageQuizGame() {
   if (gameState === "lobby") {
     const playersWithLanguages = players.filter((p) => p.language);
     const allPlayersWithLanguagesReady = playersWithLanguages.length > 0 && playersWithLanguages.every((p) => p.ready);
-    const canStartGame = currentPlayer?.isHost && allPlayersWithLanguagesReady;
+    const canStartGame = currentPlayer?.id === creatorId && allPlayersWithLanguagesReady;
 
     console.log("Lobby debug:", {
       currentPlayer,
-      isHost: currentPlayer?.isHost,
+      isCreator: currentPlayer?.id === creatorId,
+      creatorId,
       canStartGame,
       playersWithLanguages,
       allPlayersWithLanguagesReady,
@@ -665,7 +714,7 @@ export default function LanguageQuizGame() {
             </CardHeader>
             <CardContent>
               <div className="text-sm mb-4">
-                Debug: Current player is {currentPlayer?.isHost ? "Host" : "Not Host"}
+                Debug: Current player is {currentPlayer?.id === creatorId ? "Creator" : "Not Creator"}
               </div>
               {connectionError && (
                 <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm mb-4">
@@ -698,7 +747,7 @@ export default function LanguageQuizGame() {
                     <div className="flex items-center gap-2">
                       {player.isHost && <Crown className="w-4 h-4 text-yellow-500" />}
                       <span className="font-medium">{player.name}</span>
-                      {player.isHost && <span className="text-xs text-gray-500">(Host)</span>}
+                      {player.isHost && <span className="text-xs text-gray-500">(Creator)</span>}
                     </div>
                     <div className="flex items-center gap-2">
                       {player.language && (
@@ -747,7 +796,7 @@ export default function LanguageQuizGame() {
                 {currentPlayer?.ready ? "Not Ready" : "Ready Up!"}
               </Button>
 
-              {currentPlayer?.isHost && (
+              {currentPlayer?.id === creatorId && (
                 <Button
                   onClick={startGame}
                   className="w-full"
@@ -907,7 +956,7 @@ export default function LanguageQuizGame() {
               ))}
             </div>
 
-            {currentPlayer?.isHost && (
+            {currentPlayer?.id === creatorId && (
               <Button onClick={restartGame} className="w-full">
                 Play Again
               </Button>
