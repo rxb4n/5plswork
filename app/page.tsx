@@ -19,7 +19,7 @@ interface Player {
   language: Language | null;
   ready: boolean;
   score: number;
-  isHost: boolean;
+  isHost: boolean; // Client expects isHost
   currentQuestion?: {
     english: string;
     correctAnswer: string;
@@ -37,6 +37,23 @@ interface ServerInfo {
   processingTime: number;
   roomCount: number;
   timestamp: number;
+}
+
+interface ServerRoom {
+  id: string;
+  game_state: string; // Server uses snake_case
+  players: Array<{
+    id: string;
+    name: string;
+    language: Language | null;
+    ready: boolean;
+    score: number;
+    is_host: boolean; // Server uses is_host
+    current_question: Question | null; // Server uses current_question
+  }>;
+  creator_id: string;
+  winner_id: string | null;
+  question_count: number | null;
 }
 
 export default function LanguageQuizGame() {
@@ -62,6 +79,27 @@ export default function LanguageQuizGame() {
   const [startGameError, setStartGameError] = useState<string | null>(null);
   const [creatorId, setCreatorId] = useState<string | null>(null);
   const [playingTimeout, setPlayingTimeout] = useState<NodeJS.Timeout | null>(null);
+
+  // Normalize server room to client expected format
+  const normalizeRoom = (serverRoom: ServerRoom): {
+    id: string;
+    gameState: string;
+    players: Player[];
+    creatorId: string;
+  } => ({
+    id: serverRoom.id,
+    gameState: serverRoom.game_state,
+    players: serverRoom.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      language: p.language,
+      ready: p.ready,
+      score: p.score,
+      isHost: p.is_host,
+      currentQuestion: p.current_question || undefined,
+    })),
+    creatorId: serverRoom.creator_id,
+  });
 
   // Server-Sent Events connection
   const connectEventSource = useCallback(
@@ -194,142 +232,163 @@ export default function LanguageQuizGame() {
     }
   };
 
-  // Enhanced polling with better error detection
-  const pollRoomUpdates = useCallback(async () => {
+  // Enhanced polling with retry for undefined gameState
+  const pollRoomUpdates = useCallback(async (retries = 3) => {
     if (!roomId || gameState === "home") return;
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-      const response = await fetch(`/api/rooms?roomId=${roomId}`, {
-        headers: {
-          "Cache-Control": "no-cache",
-        },
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        const contentType = response.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-          const text = await response.text();
-          console.error("Non-JSON response from polling:", text);
-          throw new Error("Server returned non-JSON response");
-        }
-
-        const data = await response.json();
-        console.log("Poll room updates raw response:", data);
-
-        if (!data.room) {
-          console.error("Missing room object in poll response");
-          setConnectionError("Invalid server response: Missing room data");
-          setConsecutiveErrors((prev) => prev + 1);
-          return;
-        }
-
-        const { room, serverInfo, roomBackup } = data;
-        console.log("Poll room updates parsed:", {
-          gameState: room.gameState,
-          players: room.players,
-          currentPlayerQuestion: room.players.find((p: Player) => p.id === currentPlayer?.id)?.currentQuestion,
+        const response = await fetch(`/api/rooms?roomId=${roomId}`, {
+          headers: {
+            "Cache-Control": "no-cache",
+          },
+          signal: controller.signal,
         });
 
-        // Enforce creator as host
-        const updatedPlayers = room.players.map((p: Player) => ({
-          ...p,
-          isHost: p.id === creatorId,
-        }));
+        clearTimeout(timeoutId);
 
-        setPlayers(updatedPlayers);
-        setConnectionError(null);
-        setConsecutiveErrors(0);
-        setLastSuccessfulPoll(Date.now());
-        setShowRecoveryOption(false);
+        if (response.ok) {
+          const contentType = response.headers.get("content-type");
+          if (!contentType || !contentType.includes("application/json")) {
+            const text = await response.text();
+            console.error("Non-JSON response from polling:", text);
+            throw new Error("Server returned non-JSON response");
+          }
 
-        if (serverInfo) {
-          setServerInfo(serverInfo);
-        }
+          const data = await response.json();
+          console.log("Poll room updates raw response:", data);
 
-        const updatedCurrentPlayer = updatedPlayers.find((p: Player) => p.id === currentPlayer?.id);
-        if (updatedCurrentPlayer) {
-          setCurrentPlayer({
-            ...updatedCurrentPlayer,
-            isHost: updatedCurrentPlayer.id === creatorId,
+          if (!data.room) {
+            console.error("Missing room object in poll response");
+            setConnectionError("Invalid server response: Missing room data");
+            setConsecutiveErrors((prev) => prev + 1);
+            if (attempt < retries - 1) {
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+              continue;
+            }
+            setGameState("lobby");
+            return;
+          }
+
+          const room = normalizeRoom(data.room);
+          console.log("Poll room updates normalized:", {
+            gameState: room.gameState,
+            players: room.players,
+            currentPlayerQuestion: room.players.find((p: Player) => p.id === currentPlayer?.id)?.currentQuestion,
           });
-        }
 
-        // Handle game state
-        if (!room.gameState) {
-          console.warn("Room gameState is undefined, defaulting to lobby");
-          setGameState("lobby");
-          return;
-        }
+          // Enforce creator as host
+          const updatedPlayers = room.players.map((p: Player) => ({
+            ...p,
+            isHost: p.id === creatorId,
+          }));
 
-        if (room.gameState === "playing") {
-          console.log("Game state changed to playing:", { updatedCurrentPlayer, hasQuestion: !!updatedCurrentPlayer?.currentQuestion });
-          setGameState("playing");
-          if (updatedCurrentPlayer?.currentQuestion) {
-            setCurrentQuestion(updatedCurrentPlayer.currentQuestion);
-            setTimeLeft(10);
-            setSelectedAnswer(null);
-            setShowResult(false);
+          setPlayers(updatedPlayers);
+          setConnectionError(null);
+          setConsecutiveErrors(0);
+          setLastSuccessfulPoll(Date.now());
+          setShowRecoveryOption(false);
+
+          if (data.serverInfo) {
+            setServerInfo(data.serverInfo);
+          }
+
+          const updatedCurrentPlayer = updatedPlayers.find((p: Player) => p.id === currentPlayer?.id);
+          if (updatedCurrentPlayer) {
+            setCurrentPlayer({
+              ...updatedCurrentPlayer,
+              isHost: updatedCurrentPlayer.id === creatorId,
+            });
+          }
+
+          // Handle game state
+          if (!room.gameState) {
+            console.warn(`Room gameState is undefined (attempt ${attempt + 1})`, room);
+            setConnectionError("Server error: Game state not provided");
+            if (attempt < retries - 1) {
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+              continue;
+            }
+            setGameState("lobby");
+            return;
+          }
+
+          if (room.gameState === "playing") {
+            console.log("Game state changed to playing:", { updatedCurrentPlayer, hasQuestion: !!updatedCurrentPlayer?.currentQuestion });
+            setGameState("playing");
+            if (updatedCurrentPlayer?.currentQuestion) {
+              setCurrentQuestion(updatedCurrentPlayer.currentQuestion);
+              setTimeLeft(10);
+              setSelectedAnswer(null);
+              setShowResult(false);
+              if (playingTimeout) {
+                clearTimeout(playingTimeout);
+                setPlayingTimeout(null);
+              }
+            } else {
+              console.log("No currentQuestion for player, waiting for server update");
+              if (!playingTimeout) {
+                const timeout = setTimeout(() => {
+                  console.warn("No question received in playing state, reverting to lobby");
+                  setGameState("lobby");
+                  setConnectionError("Game failed to start: No questions received");
+                  setPlayingTimeout(null);
+                }, 10000);
+                setPlayingTimeout(timeout);
+              }
+            }
+          } else if (room.gameState === "finished" && data.room.winner_id) {
+            const winnerPlayer = updatedPlayers.find((p) => p.id === data.room.winner_id);
+            setWinner(winnerPlayer || null);
+            setGameState("finished");
             if (playingTimeout) {
               clearTimeout(playingTimeout);
               setPlayingTimeout(null);
             }
-          } else {
-            console.log("No currentQuestion for player, waiting for server update");
-            if (!playingTimeout) {
-              const timeout = setTimeout(() => {
-                console.warn("No question received in playing state, reverting to lobby");
-                setGameState("lobby");
-                setConnectionError("Game failed to start: No questions received");
-                setPlayingTimeout(null);
-              }, 10000);
-              setPlayingTimeout(timeout);
+          } else if (room.gameState === "lobby" && gameState !== "lobby") {
+            setGameState("lobby");
+            setCurrentQuestion(null);
+            setWinner(null);
+            if (playingTimeout) {
+              clearTimeout(playingTimeout);
+              setPlayingTimeout(null);
             }
           }
-        } else if (room.gameState === "finished" && room.winner) {
-          setWinner(room.winner);
-          setGameState("finished");
-          if (playingTimeout) {
-            clearTimeout(playingTimeout);
-            setPlayingTimeout(null);
-          }
-        } else if (room.gameState === "lobby" && gameState !== "lobby") {
-          setGameState("lobby");
-          setCurrentQuestion(null);
-          setWinner(null);
-          if (playingTimeout) {
-            clearTimeout(playingTimeout);
-            setPlayingTimeout(null);
-          }
+          return; // Successful poll, exit retry loop
+        } else if (response.status === 404) {
+          setConnectionError("Room not found or expired.");
+          setTimeout(() => setGameState("home"), 3000);
+          return;
+        } else if (response.status === 408) {
+          setConnectionError("Server timeout. Game may be overloaded.");
+          setConsecutiveErrors((prev) => prev + 1);
+        } else {
+          const text = await response.text();
+          console.error("Polling error response:", text);
+          throw new Error(`HTTP ${response.status}: ${text}`);
         }
-      } else if (response.status === 404) {
-        setConnectionError("Room not found or expired.");
-        setTimeout(() => setGameState("home"), 3000);
-      } else if (response.status === 408) {
-        setConnectionError("Server timeout. Game may be overloaded.");
+      } catch (error) {
+        console.error(`Failed to poll room updates (attempt ${attempt + 1}):`, error);
         setConsecutiveErrors((prev) => prev + 1);
-      } else {
-        const text = await response.text();
-        console.error("Polling error response:", text);
-        throw new Error(`HTTP ${response.status}: ${text}`);
-      }
-    } catch (error) {
-      console.error("Failed to poll room updates:", error);
-      setConsecutiveErrors((prev) => prev + 1);
 
-      if (error.name === "AbortError") {
-        setConnectionError("Polling timed out. Server may be overloaded.");
-      } else {
-        setConnectionError(`Connection issues: ${error.message}`);
-      }
+        if (error.name === "AbortError") {
+          setConnectionError("Polling timed out. Server may be overloaded.");
+        } else {
+          setConnectionError(`Connection issues: ${error.message}`);
+        }
 
-      if (consecutiveErrors > 5) {
-        setConnectionError("Too many connection errors. Please try creating a new room.");
+        if (attempt < retries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          continue;
+        }
+
+        if (consecutiveErrors > 5) {
+          setConnectionError("Too many connection errors. Please try creating a new room.");
+          setGameState("lobby");
+        }
       }
     }
   }, [roomId, gameState, currentPlayer, consecutiveErrors, creatorId, playingTimeout]);
@@ -342,12 +401,8 @@ export default function LanguageQuizGame() {
 
     const result = await apiCall("join", { name: currentPlayer.name }, currentPlayer.id);
     if (result?.room) {
-      setPlayers(
-        result.room.players.map((p: Player) => ({
-          ...p,
-          isHost: p.id === creatorId,
-        })),
-      );
+      const normalizedRoom = normalizeRoom(result.room);
+      setPlayers(normalizedRoom.players);
       setConnectionError("Room recovered successfully!");
       setShowRecoveryOption(false);
       setTimeout(() => setConnectionError(null), 3000);
@@ -367,7 +422,7 @@ export default function LanguageQuizGame() {
 
       console.log(`Polling every ${interval}ms (errors: ${consecutiveErrors})`);
 
-      const pollInterval = setInterval(pollRoomUpdates, interval);
+      const pollInterval = setInterval(() => pollRoomUpdates(), interval);
       return () => clearInterval(pollInterval);
     }
   }, [gameState, pollRoomUpdates, consecutiveErrors]);
@@ -438,9 +493,10 @@ export default function LanguageQuizGame() {
       console.log("Join result:", joinResult);
 
       if (joinResult?.room) {
+        const normalizedRoom = normalizeRoom(joinResult.room);
         setRoomId(newRoomId);
         setCreatorId(playerId);
-        const serverPlayer = joinResult.room.players.find((p: Player) => p.id === playerId);
+        const serverPlayer = normalizedRoom.players.find((p: Player) => p.id === playerId);
         console.log("Server player data:", serverPlayer);
         setCurrentPlayer({
           ...(serverPlayer || player),
@@ -448,15 +504,10 @@ export default function LanguageQuizGame() {
         });
         setGameState("lobby");
         setIsConnected(true);
-        setPlayers(
-          joinResult.room.players.map((p: Player) => ({
-            ...p,
-            isHost: p.id === playerId,
-          })),
-        );
+        setPlayers(normalizedRoom.players);
         setConnectionError(null);
         setConsecutiveErrors(0);
-        console.log("Room created successfully with players:", joinResult.room.players);
+        console.log("Room created successfully with players:", normalizedRoom.players);
       } else {
         console.error("Failed to join room after creation");
         setConnectionError(`Failed to create room: ${joinResult?.error || "Unknown error"}`);
@@ -499,28 +550,24 @@ export default function LanguageQuizGame() {
       }
 
       if (result.room) {
+        const normalizedRoom = normalizeRoom(result.room);
         setCurrentPlayer({
           ...player,
           isHost: playerId === creatorId,
         });
         setGameState("lobby");
         setIsConnected(true);
-        setPlayers(
-          result.room.players.map((p: Player) => ({
-            ...p,
-            isHost: p.id === creatorId,
-          })),
-        );
+        setPlayers(normalizedRoom.players);
         setConnectionError(null);
         setConsecutiveErrors(0);
 
-        const serverPlayer = result.room.players.find((p: Player) => p.id === playerId);
+        const serverPlayer = normalizedRoom.players.find((p: Player) => p.id === playerId);
         if (serverPlayer) {
           setCurrentPlayer({
             ...serverPlayer,
             isHost: playerId === creatorId,
           });
-          console.log("Successfully joined room with players:", result.room.players);
+          console.log("Successfully joined room with players:", normalizedRoom.players);
         }
       }
     } catch (error) {
@@ -565,13 +612,9 @@ export default function LanguageQuizGame() {
     const result = await apiCall("update-language", { language });
 
     if (result?.room) {
-      setPlayers(
-        result.room.players.map((p: Player) => ({
-          ...p,
-          isHost: p.id === creatorId,
-        })),
-      );
-      const updatedPlayer = result.room.players.find((p: Player) => p.id === currentPlayer.id);
+      const normalizedRoom = normalizeRoom(result.room);
+      setPlayers(normalizedRoom.players);
+      const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayer.id);
       if (updatedPlayer) {
         setCurrentPlayer({
           ...updatedPlayer,
@@ -591,13 +634,9 @@ export default function LanguageQuizGame() {
     const result = await apiCall("toggle-ready");
 
     if (result?.room) {
-      setPlayers(
-        result.room.players.map((p: Player) => ({
-          ...p,
-          isHost: p.id === creatorId,
-        })),
-      );
-      const updatedPlayer = result.room.players.find((p: Player) => p.id === currentPlayer.id);
+      const normalizedRoom = normalizeRoom(result.room);
+      setPlayers(normalizedRoom.players);
+      const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayer.id);
       if (updatedPlayer) {
         setCurrentPlayer({
           ...updatedPlayer,
@@ -608,7 +647,7 @@ export default function LanguageQuizGame() {
     }
   };
 
-  // Start game with immediate polling and retries
+  // Start game with forced state transition
   const startGame = async () => {
     if (!currentPlayer || currentPlayer.id !== creatorId) {
       console.log("Start game blocked: Current player is not creator", { currentPlayer, creatorId });
@@ -629,11 +668,19 @@ export default function LanguageQuizGame() {
       setStartGameError(result.error);
     } else {
       console.log("Start game API call successful:", result);
-      // Poll multiple times to catch delayed server updates
-      for (let i = 0; i < 3; i++) {
+      // Force transition to playing state for creator
+      setGameState("playing");
+      // Poll multiple times to ensure all clients sync
+      for (let i = 0; i < 5; i++) {
         await new Promise((resolve) => setTimeout(resolve, 1000 * i));
-        await pollRoomUpdates();
-        if (gameState === "playing") break;
+        await pollRoomUpdates(3);
+        if (result.room?.game_state === "playing" && currentPlayer?.currentQuestion) {
+          setCurrentQuestion(currentPlayer.currentQuestion);
+          setTimeLeft(10);
+          setSelectedAnswer(null);
+          setShowResult(false);
+          break;
+        }
       }
     }
   };

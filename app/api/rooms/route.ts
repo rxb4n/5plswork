@@ -1,4 +1,4 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server";
 import {
   initDatabase,
   createRoom,
@@ -11,20 +11,20 @@ import {
   cleanupOldRooms,
   ensureRoomHasHost,
   type Player,
-} from "../../../lib/database"
+} from "../../../lib/database";
 
 // Initialize database on startup
-let dbInitialized = false
+let dbInitialized = false;
 
 async function ensureDbInitialized() {
   if (!dbInitialized) {
     try {
-      await initDatabase()
-      dbInitialized = true
-      console.log("Database initialized successfully")
+      await initDatabase();
+      dbInitialized = true;
+      console.log("Database initialized successfully");
     } catch (error) {
-      console.error("Failed to initialize database:", error)
-      throw error
+      console.error("Failed to initialize database:", error);
+      throw error;
     }
   }
 }
@@ -56,85 +56,86 @@ const WORD_DATABASE = [
   { english: "Green", french: "Vert", german: "Grün", russian: "зелёный" },
   { english: "Yellow", french: "Jaune", german: "Gelb", russian: "жёлтый" },
   { english: "Black", french: "Noir", german: "Schwarz", russian: "чёрный" },
-]
+];
 
 function generateQuestion(language: "french" | "german" | "russian") {
-  const randomWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)]
-  const correctAnswer = randomWord[language]
+  const randomWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)];
+  const correctAnswer = randomWord[language];
 
-  const wrongAnswers: string[] = []
+  const wrongAnswers: string[] = [];
   while (wrongAnswers.length < 3) {
-    const randomWrongWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)]
-    const wrongAnswer = randomWrongWord[language]
+    const randomWrongWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)];
+    const wrongAnswer = randomWrongWord[language];
     if (wrongAnswer !== correctAnswer && !wrongAnswers.includes(wrongAnswer)) {
-      wrongAnswers.push(wrongAnswer)
+      wrongAnswers.push(wrongAnswer);
     }
   }
 
-  const options = [correctAnswer, ...wrongAnswers].sort(() => Math.random() - 0.5)
+  const options = [correctAnswer, ...wrongAnswers].sort(() => Math.random() - 0.5);
 
   return {
     english: randomWord.english,
     correctAnswer,
     options,
-  }
+  };
 }
 
 export async function POST(request: NextRequest) {
   try {
     // Ensure database is initialized
-    await ensureDbInitialized()
+    await ensureDbInitialized();
 
-    const body = await request.json()
-    const { action, roomId, playerId, data } = body
+    const body = await request.json();
+    const { action, roomId, playerId, data } = body;
 
-    console.log(`API Call: ${action} for room ${roomId} by player ${playerId}`)
+    console.log(`API Call: ${action} for room ${roomId} by player ${playerId}`);
 
     // Validate required parameters
     if (!action) {
-      return NextResponse.json({ error: "Action is required" }, { status: 400 })
+      return NextResponse.json({ error: "Action is required" }, { status: 400 });
     }
 
     if (!roomId && action !== "ping") {
-      return NextResponse.json({ error: "Room ID is required" }, { status: 400 })
+      return NextResponse.json({ error: "Room ID is required" }, { status: 400 });
     }
 
     if (!playerId && action !== "ping") {
-      return NextResponse.json({ error: "Player ID is required" }, { status: 400 })
+      return NextResponse.json({ error: "Player ID is required" }, { status: 400 });
     }
 
     // Cleanup old rooms periodically
     if (Math.random() < 0.1) {
       // 10% chance
       try {
-        await cleanupOldRooms()
+        await cleanupOldRooms();
       } catch (error) {
-        console.warn("Failed to cleanup old rooms:", error)
+        console.warn("Failed to cleanup old rooms:", error);
       }
     }
 
     switch (action) {
       case "create":
         try {
-          const newRoom = await createRoom(roomId)
+          const newRoom = await createRoom(roomId);
           if (!newRoom) {
-            return NextResponse.json({ error: "Failed to create room" }, { status: 500 })
+            return NextResponse.json({ error: "Failed to create room" }, { status: 500 });
           }
-          return NextResponse.json({ success: true, room: newRoom })
+          console.log("Room created:", newRoom);
+          return NextResponse.json({ success: true, room: newRoom });
         } catch (error) {
-          console.error("Error creating room:", error)
-          return NextResponse.json({ error: "Failed to create room" }, { status: 500 })
+          console.error("Error creating room:", error);
+          return NextResponse.json({ error: "Failed to create room" }, { status: 500 });
         }
 
       case "join":
         try {
-          const room = await getRoom(roomId)
+          const room = await getRoom(roomId);
           if (!room) {
-            return NextResponse.json({ error: "Room not found" }, { status: 404 })
+            return NextResponse.json({ error: "Room not found" }, { status: 404 });
           }
 
           // Determine if this player should be the host
-          const shouldBeHost = room.players.length === 0
+          const shouldBeHost = room.players.length === 0;
 
           const player: Omit<Player, "last_seen"> = {
             id: playerId,
@@ -144,183 +145,191 @@ export async function POST(request: NextRequest) {
             score: 0,
             is_host: shouldBeHost,
             current_question: null,
-          }
+          };
 
-          console.log(`Player ${playerId} joining room ${roomId}. Should be host: ${shouldBeHost}`)
+          console.log(`Player ${playerId} joining room ${roomId}. Should be host: ${shouldBeHost}`);
 
-          const success = await addPlayerToRoom(roomId, player)
+          const success = await addPlayerToRoom(roomId, player);
           if (!success) {
-            return NextResponse.json({ error: "Failed to join room" }, { status: 500 })
+            return NextResponse.json({ error: "Failed to join room" }, { status: 500 });
           }
 
           // Ensure room has proper host assignment
-          await ensureRoomHasHost(roomId)
+          await ensureRoomHasHost(roomId);
 
-          const updatedRoom = await getRoom(roomId)
-          return NextResponse.json({ room: updatedRoom })
+          const updatedRoom = await getRoom(roomId);
+          console.log("Room after join:", updatedRoom);
+          return NextResponse.json({ room: updatedRoom });
         } catch (error) {
-          console.error("Error joining room:", error)
-          return NextResponse.json({ error: "Failed to join room" }, { status: 500 })
+          console.error("Error joining room:", error);
+          return NextResponse.json({ error: "Failed to join room" }, { status: 500 });
         }
 
       case "leave":
         try {
-          await removePlayerFromRoom(playerId)
-          const roomAfterLeave = await getRoom(roomId)
+          await removePlayerFromRoom(playerId);
+          const roomAfterLeave = await getRoom(roomId);
           if (!roomAfterLeave || roomAfterLeave.players.length === 0) {
-            await deleteRoom(roomId)
-            return NextResponse.json({ success: true })
+            await deleteRoom(roomId);
+            console.log(`Room ${roomId} deleted after leave`);
+            return NextResponse.json({ success: true });
           }
 
           // Ensure there's still a host after player leaves
-          await ensureRoomHasHost(roomId)
+          await ensureRoomHasHost(roomId);
 
-          const updatedRoom = await getRoom(roomId)
-          return NextResponse.json({ room: updatedRoom })
+          const updatedRoom = await getRoom(roomId);
+          console.log("Room after leave:", updatedRoom);
+          return NextResponse.json({ room: updatedRoom });
         } catch (error) {
-          console.error("Error leaving room:", error)
-          return NextResponse.json({ error: "Failed to leave room" }, { status: 500 })
+          console.error("Error leaving room:", error);
+          return NextResponse.json({ error: "Failed to leave room" }, { status: 500 });
         }
 
       case "update-language":
         try {
           // Get current player state to preserve ready status if they already had a language
-          const currentRoom = await getRoom(roomId)
-          const currentPlayer = currentRoom?.players.find((p) => p.id === playerId)
+          const currentRoom = await getRoom(roomId);
+          const currentPlayer = currentRoom?.players.find((p) => p.id === playerId);
 
           // Only reset ready status if the player didn't have a language before
-          const shouldResetReady = !currentPlayer?.language
+          const shouldResetReady = !currentPlayer?.language;
 
           await updatePlayer(playerId, {
             language: data.language,
             ready: shouldResetReady ? false : currentPlayer.ready,
-          })
+          });
 
-          const updatedRoom = await getRoom(roomId)
-          return NextResponse.json({ room: updatedRoom })
+          const updatedRoom = await getRoom(roomId);
+          console.log("Room after language update:", updatedRoom);
+          return NextResponse.json({ room: updatedRoom });
         } catch (error) {
-          console.error("Error updating language:", error)
-          return NextResponse.json({ error: "Failed to update language" }, { status: 500 })
+          console.error("Error updating language:", error);
+          return NextResponse.json({ error: "Failed to update language" }, { status: 500 });
         }
 
       case "toggle-ready":
         try {
-          const currentRoom = await getRoom(roomId)
+          const currentRoom = await getRoom(roomId);
           if (!currentRoom) {
-            return NextResponse.json({ error: "Room not found" }, { status: 404 })
+            return NextResponse.json({ error: "Room not found" }, { status: 404 });
           }
 
-          const currentPlayer = currentRoom.players.find((p) => p.id === playerId)
+          const currentPlayer = currentRoom.players.find((p) => p.id === playerId);
           if (currentPlayer && currentPlayer.language) {
-            await updatePlayer(playerId, { ready: !currentPlayer.ready })
+            await updatePlayer(playerId, { ready: !currentPlayer.ready });
           }
-          const updatedRoom = await getRoom(roomId)
-          return NextResponse.json({ room: updatedRoom })
+          const updatedRoom = await getRoom(roomId);
+          console.log("Room after toggle ready:", updatedRoom);
+          return NextResponse.json({ room: updatedRoom });
         } catch (error) {
-          console.error("Error toggling ready:", error)
-          return NextResponse.json({ error: "Failed to toggle ready" }, { status: 500 })
+          console.error("Error toggling ready:", error);
+          return NextResponse.json({ error: "Failed to toggle ready" }, { status: 500 });
         }
 
       case "start-game":
         try {
-          const gameRoom = await getRoom(roomId)
+          const gameRoom = await getRoom(roomId);
           if (!gameRoom) {
-            return NextResponse.json({ error: "Room not found" }, { status: 404 })
+            return NextResponse.json({ error: "Room not found" }, { status: 404 });
           }
 
-          const host = gameRoom.players.find((p) => p.id === playerId)
+          const host = gameRoom.players.find((p) => p.id === playerId);
           if (!host?.is_host) {
-            return NextResponse.json({ error: "Only the host can start the game" }, { status: 403 })
+            return NextResponse.json({ error: "Only the host can start the game" }, { status: 403 });
           }
 
           // Check if all players have selected a language and are ready
-          const playersWithLanguage = gameRoom.players.filter((p) => p.language)
+          const playersWithLanguage = gameRoom.players.filter((p) => p.language);
           if (playersWithLanguage.length === 0) {
-            return NextResponse.json({ error: "At least one player must select a language" }, { status: 400 })
+            return NextResponse.json({ error: "At least one player must select a language" }, { status: 400 });
           }
 
           if (!playersWithLanguage.every((p) => p.ready)) {
-            return NextResponse.json({ error: "All players with languages must be ready" }, { status: 400 })
+            return NextResponse.json({ error: "All players with languages must be ready" }, { status: 400 });
           }
 
           await updateRoom(roomId, {
             game_state: "playing",
-            question_count: 0,
-          })
+            question_count: 0, // Fixed typo from null to 0
+          });
 
           // Generate questions for all players with languages
           for (const player of playersWithLanguage) {
             if (player.language) {
-              const question = generateQuestion(player.language)
-              await updatePlayer(player.id, { current_question: question })
+              const question = generateQuestion(player.language);
+              await updatePlayer(player.id, { current_question: question });
             }
           }
 
-          const updatedRoom = await getRoom(roomId)
-          return NextResponse.json({ room: updatedRoom })
+          const updatedRoom = await getRoom(roomId);
+          console.log("Room after start game:", updatedRoom);
+          return NextResponse.json({ room: updatedRoom });
         } catch (error) {
-          console.error("Error starting game:", error)
-          return NextResponse.json({ error: "Failed to start game" }, { status: 500 })
+          console.error("Error starting game:", error);
+          return NextResponse.json({ error: "Failed to start game" }, { status: 500 });
         }
 
       case "answer":
         try {
-          const answerRoom = await getRoom(roomId)
+          const answerRoom = await getRoom(roomId);
           if (!answerRoom) {
-            return NextResponse.json({ error: "Room not found" }, { status: 404 })
+            return NextResponse.json({ error: "Room not found" }, { status: 404 });
           }
 
-          const answeringPlayer = answerRoom.players.find((p) => p.id === playerId)
+          const answeringPlayer = answerRoom.players.find((p) => p.id === playerId);
           if (answeringPlayer && answeringPlayer.current_question) {
-            const { answer, timeLeft } = data
-            const isCorrect = answer === answeringPlayer.current_question.correctAnswer
+            const { answer, timeLeft } = data;
+            const isCorrect = answer === answeringPlayer.current_question.correctAnswer;
 
             if (isCorrect) {
-              const points = Math.max(1, 10 - (10 - timeLeft))
-              const newScore = answeringPlayer.score + points
+              const points = Math.max(1, 10 - (10 - timeLeft));
+              const newScore = answeringPlayer.score + points;
 
-              await updatePlayer(playerId, { score: newScore })
+              await updatePlayer(playerId, { score: newScore });
 
               if (newScore >= 100) {
                 await updateRoom(roomId, {
                   game_state: "finished",
                   winner_id: playerId,
-                })
-                const finalRoom = await getRoom(roomId)
-                return NextResponse.json({ room: finalRoom })
+                });
+                const finalRoom = await getRoom(roomId);
+                console.log("Room after game finished:", finalRoom);
+                return NextResponse.json({ room: finalRoom });
               }
             }
 
             // Generate next question
             if (answeringPlayer.language) {
-              const nextQuestion = generateQuestion(answeringPlayer.language)
-              await updatePlayer(playerId, { current_question: nextQuestion })
+              const nextQuestion = generateQuestion(answeringPlayer.language);
+              await updatePlayer(playerId, { current_question: nextQuestion });
             }
           }
-          const updatedRoom = await getRoom(roomId)
-          return NextResponse.json({ room: updatedRoom })
+          const updatedRoom = await getRoom(roomId);
+          console.log("Room after answer:", updatedRoom);
+          return NextResponse.json({ room: updatedRoom });
         } catch (error) {
-          console.error("Error processing answer:", error)
-          return NextResponse.json({ error: "Failed to process answer" }, { status: 500 })
+          console.error("Error processing answer:", error);
+          return NextResponse.json({ error: "Failed to process answer" }, { status: 500 });
         }
 
       case "restart":
         try {
-          const restartRoom = await getRoom(roomId)
+          const restartRoom = await getRoom(roomId);
           if (!restartRoom) {
-            return NextResponse.json({ error: "Room not found" }, { status: 404 })
+            return NextResponse.json({ error: "Room not found" }, { status: 404 });
           }
 
-          const restartHost = restartRoom.players.find((p) => p.id === playerId)
+          const restartHost = restartRoom.players.find((p) => p.id === playerId);
           if (!restartHost?.is_host) {
-            return NextResponse.json({ error: "Only the host can restart the game" }, { status: 403 })
+            return NextResponse.json({ error: "Only the host can restart the game" }, { status: 403 });
           }
 
           await updateRoom(roomId, {
             game_state: "lobby",
             winner_id: null,
             question_count: 0,
-          })
+          });
 
           // Reset all players
           for (const player of restartRoom.players) {
@@ -328,73 +337,75 @@ export async function POST(request: NextRequest) {
               score: 0,
               ready: false,
               current_question: null,
-            })
+            });
           }
 
-          const updatedRoom = await getRoom(roomId)
-          return NextResponse.json({ room: updatedRoom })
+          const updatedRoom = await getRoom(roomId);
+          console.log("Room after restart:", updatedRoom);
+          return NextResponse.json({ room: updatedRoom });
         } catch (error) {
-          console.error("Error restarting game:", error)
-          return NextResponse.json({ error: "Failed to restart game" }, { status: 500 })
+          console.error("Error restarting game:", error);
+          return NextResponse.json({ error: "Failed to restart game" }, { status: 500 });
         }
 
       case "ping":
         try {
           if (playerId) {
             // Just update last_seen timestamp
-            await updatePlayer(playerId, {})
+            await updatePlayer(playerId, {});
           }
-          return NextResponse.json({ success: true })
+          return NextResponse.json({ success: true });
         } catch (error) {
-          console.error("Error processing ping:", error)
-          return NextResponse.json({ error: "Failed to process ping" }, { status: 500 })
+          console.error("Error processing ping:", error);
+          return NextResponse.json({ error: "Failed to process ping" }, { status: 500 });
         }
 
       default:
-        return NextResponse.json({ error: "Invalid action" }, { status: 400 })
+        return NextResponse.json({ error: "Invalid action" }, { status: 400 });
     }
   } catch (error) {
-    console.error("API Error:", error)
+    console.error("API Error:", error);
     return NextResponse.json(
       {
         error: "Internal server error",
         details: error.message,
       },
       { status: 500 },
-    )
+    );
   }
 }
 
 export async function GET(request: NextRequest) {
   try {
     // Ensure database is initialized
-    await ensureDbInitialized()
+    await ensureDbInitialized();
 
-    const { searchParams } = new URL(request.url)
-    const roomId = searchParams.get("roomId")
+    const { searchParams } = new URL(request.url);
+    const roomId = searchParams.get("roomId");
 
     if (!roomId) {
-      return NextResponse.json({ error: "Room ID required" }, { status: 400 })
+      return NextResponse.json({ error: "Room ID required" }, { status: 400 });
     }
 
-    const room = await getRoom(roomId)
+    const room = await getRoom(roomId);
     if (!room) {
-      return NextResponse.json({ error: "Room not found" }, { status: 404 })
+      return NextResponse.json({ error: "Room not found" }, { status: 404 });
     }
 
     // Ensure room has proper host before returning
-    await ensureRoomHasHost(roomId)
-    const updatedRoom = await getRoom(roomId)
+    await ensureRoomHasHost(roomId);
+    const updatedRoom = await getRoom(roomId);
 
-    return NextResponse.json({ room: updatedRoom })
+    console.log("GET /api/rooms response:", updatedRoom);
+    return NextResponse.json({ room: updatedRoom });
   } catch (error) {
-    console.error("GET Error:", error)
+    console.error("GET Error:", error);
     return NextResponse.json(
       {
         error: "Internal server error",
         details: error.message,
       },
       { status: 500 },
-    )
+    );
   }
 }
