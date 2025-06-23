@@ -75,6 +75,7 @@ export default function LanguageQuizGame() {
   const [startGameError, setStartGameError] = useState<string | null>(null);
   const [creatorId, setCreatorId] = useState<string | null>(null);
   const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(null);
+  const [waitingForNewQuestion, setWaitingForNewQuestion] = useState(true); // New state to control question updates
 
   // Memoize currentQuestion to prevent unnecessary re-renders
   const memoizedCurrentQuestion = useMemo(() => currentQuestion, [currentQuestion?.questionId]);
@@ -272,15 +273,16 @@ export default function LanguageQuizGame() {
 
         if (room.gameState === "playing") {
           setGameState("playing");
-          if (updatedCurrentPlayer?.currentQuestion) {
-            // Only update question and reset timer if questionId has changed
+          if (waitingForNewQuestion && updatedCurrentPlayer?.currentQuestion) {
+            // Only update question if waiting for a new one
             if (updatedCurrentPlayer.currentQuestion.questionId !== currentQuestionId) {
-              console.log(`Resetting timer to 10s for new question ${updatedCurrentPlayer.currentQuestion.questionId}`);
+              console.log(`Setting new question ${updatedCurrentPlayer.currentQuestion.questionId}`);
               setCurrentQuestion(updatedCurrentPlayer.currentQuestion);
               setCurrentQuestionId(updatedCurrentPlayer.currentQuestion.questionId);
               setTimeLeft(10);
               setSelectedAnswer(null);
               setShowResult(false);
+              setWaitingForNewQuestion(false);
               console.log("New question received:", updatedCurrentPlayer.currentQuestion);
             }
           }
@@ -288,11 +290,13 @@ export default function LanguageQuizGame() {
           const winnerPlayer = updatedPlayers.find((p) => p.id === data.room.winner_id);
           setWinner(winnerPlayer || null);
           setGameState("finished");
+          setWaitingForNewQuestion(true);
         } else if (room.gameState === "lobby" && gameState !== "lobby") {
           setGameState("lobby");
           setCurrentQuestion(null);
           setCurrentQuestionId(null);
           setWinner(null);
+          setWaitingForNewQuestion(true);
         }
       } else if (response.status === 404) {
         setConnectionError("Room not found or expired.");
@@ -544,6 +548,7 @@ export default function LanguageQuizGame() {
     setCreatorId(null);
     setCurrentQuestion(null);
     setCurrentQuestionId(null);
+    setWaitingForNewQuestion(true);
   };
 
   // Update player language
@@ -612,19 +617,21 @@ export default function LanguageQuizGame() {
     } else {
       console.log("Start game succeeded:", result);
       setGameState("playing");
+      setWaitingForNewQuestion(true); // Allow first question to load
       // Poll to ensure question sync
       for (let i = 0; i < 5; i++) {
         await new Promise((resolve) => setTimeout(resolve, i * 1000));
         await pollRoomUpdates();
         const updatedPlayers = players;
         const newQuestion = updatedPlayers.find((p: Player) => p.id === currentPlayer.id)?.currentQuestion;
-        if (newQuestion) {
+        if (newQuestion && waitingForNewQuestion) {
           console.log(`Initial question set after start: ${newQuestion.questionId}`);
           setCurrentQuestion(newQuestion);
           setCurrentQuestionId(newQuestion.questionId);
           setTimeLeft(10);
           setSelectedAnswer(null);
           setShowResult(false);
+          setWaitingForNewQuestion(false);
           break;
         }
       }
@@ -650,13 +657,16 @@ export default function LanguageQuizGame() {
           ...updatedPlayer,
           isHost: updatedPlayer.id === creatorId,
         });
-        if (updatedPlayer.currentQuestion) {
+        if (updatedPlayer.currentQuestion && updatedPlayer.currentQuestion.questionId !== currentQuestionId) {
           console.log(`Setting new question after answer: ${updatedPlayer.currentQuestion.questionId}`);
           setCurrentQuestion(updatedPlayer.currentQuestion);
           setCurrentQuestionId(updatedPlayer.currentQuestion.questionId);
           setTimeLeft(10);
           setSelectedAnswer(null);
           setShowResult(false);
+          setWaitingForNewQuestion(false);
+        } else {
+          setWaitingForNewQuestion(true); // Allow next question on poll
         }
       }
       setPlayers(normalizedRoom.players);
@@ -668,6 +678,7 @@ export default function LanguageQuizGame() {
     if (!currentPlayer || currentPlayer.id !== creatorId) return;
     console.log("Restarting game");
     await apiCall("restart", {}, currentPlayer.id);
+    setWaitingForNewQuestion(true);
   };
 
   // Connection status indicator
