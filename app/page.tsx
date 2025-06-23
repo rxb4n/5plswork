@@ -10,93 +10,95 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Progress } from "../components/ui/progress"
 import { Users, Crown, Clock, Trophy, AlertTriangle, Wifi, WifiOff } from "lucide-react"
 
-type Language = "french" | "german" | "russian"
-type GameState = "home" | "lobby" | "playing" | "finished"
+type Language = "french" | "german" | "russian";
+type GameState = "home" | "lobby" | "playing" | "finished";
 
 interface Player {
-  id: string
-  name: string
-  language: Language | null
-  ready: boolean
-  score: number
-  isHost: boolean
+  id: string;
+  name: string;
+  language: Language | null;
+  ready: boolean;
+  score: number;
+  isHost: boolean;
   currentQuestion?: {
-    english: string
-    correctAnswer: string
-    options: string[]
-  }
+    english: string;
+    correctAnswer: string;
+    options: string[];
+  };
 }
 
 interface Question {
-  english: string
-  correctAnswer: string
-  options: string[]
+  english: string;
+  correctAnswer: string;
+  options: string[];
 }
 
 interface ServerInfo {
-  processingTime: number
-  roomCount: number
-  timestamp: number
+  processingTime: number;
+  roomCount: number;
+  timestamp: number;
 }
 
 export default function LanguageQuizGame() {
-  const [eventSource, setEventSource] = useState<EventSource | null>(null)
-  const [isConnected, setIsConnected] = useState(false)
-  const [gameState, setGameState] = useState<GameState>("home")
-  const [playerName, setPlayerName] = useState("")
-  const [roomId, setRoomId] = useState("")
-  const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null)
-  const [players, setPlayers] = useState<Player[]>([])
-  const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
-  const [timeLeft, setTimeLeft] = useState(10)
-  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null)
-  const [showResult, setShowResult] = useState(false)
-  const [winner, setWinner] = useState<Player | null>(null)
-  const [connectionError, setConnectionError] = useState<string | null>(null)
-  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null)
-  const [lastSuccessfulPoll, setLastSuccessfulPoll] = useState(Date.now())
-  const [consecutiveErrors, setConsecutiveErrors] = useState(0)
-  const [roomBackup, setRoomBackup] = useState<string | null>(null)
-  const [showRecoveryOption, setShowRecoveryOption] = useState(false)
+  const [eventSource, setEventSource] = useState<EventSource | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [gameState, setGameState] = useState<GameState>("home");
+  const [playerName, setPlayerName] = useState("");
+  const [roomId, setRoomId] = useState("");
+  const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
+  const [timeLeft, setTimeLeft] = useState(10);
+  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
+  const [showResult, setShowResult] = useState(false);
+  const [winner, setWinner] = useState<Player | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
+  const [lastSuccessfulPoll, setLastSuccessfulPoll] = useState(Date.now());
+  const [consecutiveErrors, setConsecutiveErrors] = useState(0);
+  const [roomBackup, setRoomBackup] = useState<string | null>(null);
+  const [showRecoveryOption, setShowRecoveryOption] = useState(false);
+  const [isStartingGame, setIsStartingGame] = useState(false);
+  const [startGameError, setStartGameError] = useState<string | null>(null); // New state for start game error
 
   // Server-Sent Events connection
   const connectEventSource = useCallback(
     (roomId: string, playerId: string) => {
-      const es = new EventSource(`/api/events?roomId=${roomId}&playerId=${playerId}`)
+      const es = new EventSource(`/api/events?roomId=${roomId}&playerId=${playerId}`);
 
       es.onopen = () => {
-        setIsConnected(true)
-        setEventSource(es)
-        setConnectionError(null)
-      }
+        setIsConnected(true);
+        setEventSource(es);
+        setConnectionError(null);
+      };
 
       es.onmessage = (event) => {
-        const message = JSON.parse(event.data)
-        handleServerMessage(message)
-      }
+        const message = JSON.parse(event.data);
+        handleServerMessage(message);
+      };
 
       es.onerror = () => {
-        setIsConnected(false)
-        setConnectionError("Connection lost. Retrying...")
+        setIsConnected(false);
+        setConnectionError("Connection lost. Retrying...");
         setTimeout(() => {
           if (gameState !== "home") {
-            connectEventSource(roomId, playerId)
+            connectEventSource(roomId, playerId);
           }
-        }, 3000)
-      }
+        }, 3000);
+      };
 
-      return es
+      return es;
     },
     [gameState],
-  )
+  );
 
   const handleServerMessage = (message: any) => {
     // For now, we'll poll for updates instead of using SSE for simplicity
-  }
+  };
 
   // Enhanced API call helper with better error handling
   const apiCall = async (action: string, data: any = {}, playerId?: string, targetRoomId?: string, retries = 2) => {
-    const useRoomId = targetRoomId || roomId
+    const useRoomId = targetRoomId || roomId;
 
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
@@ -104,10 +106,10 @@ export default function LanguageQuizGame() {
           roomId: useRoomId,
           playerId: playerId || currentPlayer?.id,
           data,
-        })
+        });
 
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 15000)
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
 
         const response = await fetch("/api/rooms", {
           method: "POST",
@@ -119,234 +121,245 @@ export default function LanguageQuizGame() {
             data,
           }),
           signal: controller.signal,
-        })
+        });
 
-        clearTimeout(timeoutId)
+        clearTimeout(timeoutId);
 
-        const contentType = response.headers.get("content-type")
+        const contentType = response.headers.get("content-type");
         if (!contentType || !contentType.includes("application/json")) {
-          const text = await response.text()
-          console.error(`Non-JSON response for ${action}:`, text)
-          throw new Error(`Server returned non-JSON response: ${text.substring(0, 100)}...`)
+          const text = await response.text();
+          console.error(`Non-JSON response for ${action}:`, text);
+          throw new Error(`Server returned non-JSON response: ${text.substring(0, 100)}...`);
         }
 
-        const result = await response.json()
-        console.log(`API call ${action} result:`, result)
+        const result = await response.json();
+        console.log(`API call ${action} result:`, result);
 
         if (!response.ok) {
-          console.error(`API call ${action} failed:`, result)
+          console.error(`API call ${action} failed:`, result);
+          const errorMsg = result.error || `API call failed with status ${response.status}`;
           if (response.status === 408) {
-            setConnectionError("Server is overloaded. Please wait...")
+            setConnectionError("Server is overloaded. Please wait...");
           } else if (response.status === 404) {
-            setConnectionError(result.error || "Room expired or not found.")
-            setShowRecoveryOption(true)
+            setConnectionError(result.error || "Room expired or not found.");
+            setShowRecoveryOption(true);
             if (gameState !== "home") {
               setTimeout(() => {
-                setGameState("home")
-                setShowRecoveryOption(false)
-              }, 5000)
+                setGameState("home");
+                setShowRecoveryOption(false);
+              }, 5000);
             }
           } else if (response.status === 500) {
-            setConnectionError(`Server error: ${result.error || "Internal server error"}`)
+            setConnectionError(`Server error: ${result.error || "Internal server error"}`);
+          } else if (action === "start-game") {
+            setStartGameError(errorMsg); // Capture start-game specific error
           }
 
           if (attempt === retries - 1) {
-            return { error: result.error || "API call failed" }
+            return { error: errorMsg };
           }
-          await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)))
-          continue
+          await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)));
+          continue;
         }
 
-        setConnectionError(null)
-        setConsecutiveErrors(0)
-        setShowRecoveryOption(false)
-        return result
+        setConnectionError(null);
+        setConsecutiveErrors(0);
+        setShowRecoveryOption(false);
+        setStartGameError(null); // Clear start game error on success
+        return result;
       } catch (error) {
-        console.error(`API call failed (attempt ${attempt + 1}):`, error)
+        console.error(`API call failed (attempt ${attempt + 1}):`, error);
 
+        const errorMsg = error.message || "Network error";
         if (error.name === "AbortError") {
-          setConnectionError("Request timed out. Server may be overloaded.")
+          setConnectionError("Request timed out. Server may be overloaded.");
         } else if (error.message.includes("Failed to fetch")) {
-          setConnectionError("Network error. Please check your connection.")
+          setConnectionError("Network error. Please check your connection.");
         } else {
-          setConnectionError(`Error: ${error.message}`)
+          setConnectionError(`Error: ${error.message}`);
+        }
+
+        if (action === "start-game") {
+          setStartGameError(errorMsg); // Capture start-game specific error
         }
 
         if (attempt === retries - 1) {
-          setConsecutiveErrors((prev) => prev + 1)
-          return { error: error.message || "Network error" }
+          setConsecutiveErrors((prev) => prev + 1);
+          return { error: errorMsg };
         }
-        await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)))
+        await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)));
       }
     }
-  }
+  };
 
   // Enhanced polling with better error detection
   const pollRoomUpdates = useCallback(async () => {
-    if (!roomId || gameState === "home") return
+    if (!roomId || gameState === "home") return;
 
     try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10000)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
       const response = await fetch(`/api/rooms?roomId=${roomId}`, {
         headers: {
           "Cache-Control": "no-cache",
         },
         signal: controller.signal,
-      })
+      });
 
-      clearTimeout(timeoutId)
+      clearTimeout(timeoutId);
 
       if (response.ok) {
-        const contentType = response.headers.get("content-type")
+        const contentType = response.headers.get("content-type");
         if (!contentType || !contentType.includes("application/json")) {
-          const text = await response.text()
-          console.error("Non-JSON response from polling:", text)
-          throw new Error("Server returned non-JSON response")
+          const text = await response.text();
+          console.error("Non-JSON response from polling:", text);
+          throw new Error("Server returned non-JSON response");
         }
 
-        const { room, serverInfo, roomBackup } = await response.json()
-        console.log("Poll room updates:", { players: room.players })
+        const { room, serverInfo, roomBackup } = await response.json();
+        console.log("Poll room updates:", { gameState: room.gameState, players: room.players });
 
         // Check if there's a host; if not, assign the last player as host
-        const hasHost = room.players.some((p: Player) => p.isHost)
-        let updatedPlayers = room.players
+        const hasHost = room.players.some((p: Player) => p.isHost);
+        let updatedPlayers = room.players;
         if (!hasHost && room.players.length > 0) {
-          const lastPlayer = room.players[room.players.length - 1]
-          console.log(`No host found, assigning last player as host: ${lastPlayer.name}`)
+          const lastPlayer = room.players[room.players.length - 1];
+          console.log(`No host found, assigning last player as host: ${lastPlayer.name}`);
           updatedPlayers = room.players.map((p: Player) =>
             p.id === lastPlayer.id ? { ...p, isHost: true } : { ...p, isHost: false }
-          )
+          );
         }
 
-        setPlayers(updatedPlayers)
-        setConnectionError(null)
-        setConsecutiveErrors(0)
-        setLastSuccessfulPoll(Date.now())
-        setShowRecoveryOption(false)
+        setPlayers(updatedPlayers);
+        setConnectionError(null);
+        setConsecutiveErrors(0);
+        setLastSuccessfulPoll(Date.now());
+        setShowRecoveryOption(false);
 
         if (serverInfo) {
-          setServerInfo(serverInfo)
+          setServerInfo(serverInfo);
         }
 
-        const updatedCurrentPlayer = updatedPlayers.find((p: Player) => p.id === currentPlayer?.id)
+        const updatedCurrentPlayer = updatedPlayers.find((p: Player) => p.id === currentPlayer?.id);
         if (updatedCurrentPlayer) {
           setCurrentPlayer({
             ...updatedCurrentPlayer,
             isHost: currentPlayer?.isHost || updatedCurrentPlayer.isHost,
-          })
+          });
         }
 
-        if (room.gameState === "playing" && updatedCurrentPlayer.currentQuestion) {
-          if (!currentQuestion || currentQuestion.english !== updatedCurrentPlayer.currentQuestion.english) {
-            setCurrentQuestion(updatedCurrentPlayer.currentQuestion)
-            setTimeLeft(10)
-            setSelectedAnswer(null)
-            setShowResult(false)
-            setGameState("playing")
+        // Relaxed condition to detect game start
+        if (room.gameState === "playing") {
+          console.log("Game state changed to playing:", updatedCurrentPlayer);
+          setGameState("playing");
+          if (updatedCurrentPlayer?.currentQuestion) {
+            setCurrentQuestion(updatedCurrentPlayer.currentQuestion);
+            setTimeLeft(10);
+            setSelectedAnswer(null);
+            setShowResult(false);
           }
         }
 
         if (room.gameState === "finished" && room.winner) {
-          setWinner(room.winner)
-          setGameState("finished")
+          setWinner(room.winner);
+          setGameState("finished");
         }
 
         if (room.gameState === "lobby" && gameState !== "lobby") {
-          setGameState("lobby")
-          setCurrentQuestion(null)
-          setWinner(null)
+          setGameState("lobby");
+          setCurrentQuestion(null);
+          setWinner(null);
         }
       } else if (response.status === 404) {
-        setConnectionError("Room not found or expired.")
-        setTimeout(() => setGameState("home"), 3000)
+        setConnectionError("Room not found or expired.");
+        setTimeout(() => setGameState("home"), 3000);
       } else if (response.status === 408) {
-        setConnectionError("Server timeout. Game may be overloaded.")
-        setConsecutiveErrors((prev) => prev + 1)
+        setConnectionError("Server timeout. Game may be overloaded.");
+        setConsecutiveErrors((prev) => prev + 1);
       } else {
-        const text = await response.text()
-        console.error("Polling error response:", text)
-        throw new Error(`HTTP ${response.status}: ${text}`)
+        const text = await response.text();
+        console.error("Polling error response:", text);
+        throw new Error(`HTTP ${response.status}: ${text}`);
       }
     } catch (error) {
-      console.error("Failed to poll room updates:", error)
-      setConsecutiveErrors((prev) => prev + 1)
+      console.error("Failed to poll room updates:", error);
+      setConsecutiveErrors((prev) => prev + 1);
 
       if (error.name === "AbortError") {
-        setConnectionError("Polling timed out. Server may be overloaded.")
+        setConnectionError("Polling timed out. Server may be overloaded.");
       } else {
-        setConnectionError(`Connection issues: ${error.message}`)
+        setConnectionError(`Connection issues: ${error.message}`);
       }
 
       if (consecutiveErrors > 5) {
-        setConnectionError("Too many connection errors. Please try creating a new room.")
+        setConnectionError("Too many connection errors. Please try creating a new room.");
       }
     }
-  }, [roomId, gameState, currentPlayer, currentQuestion, consecutiveErrors])
+  }, [roomId, gameState, currentPlayer, currentQuestion, consecutiveErrors]);
 
   // Attempt room recovery
   const attemptRoomRecovery = async () => {
-    if (!roomId || !currentPlayer) return
+    if (!roomId || !currentPlayer) return;
 
-    setConnectionError("Attempting to recover room...")
+    setConnectionError("Attempting to recover room...");
 
-    const result = await apiCall("join", { name: currentPlayer.name }, currentPlayer.id)
+    const result = await apiCall("join", { name: currentPlayer.name }, currentPlayer.id);
     if (result?.room) {
-      setPlayers(result.room.players)
-      setConnectionError("Room recovered successfully!")
-      setShowRecoveryOption(false)
-      setTimeout(() => setConnectionError(null), 3000)
+      setPlayers(result.room.players);
+      setConnectionError("Room recovered successfully!");
+      setShowRecoveryOption(false);
+      setTimeout(() => setConnectionError(null), 3000);
     } else {
-      setConnectionError("Could not recover room. Please create a new one.")
-      setShowRecoveryOption(false)
-      setTimeout(() => setGameState("home"), 3000)
+      setConnectionError("Could not recover room. Please create a new one.");
+      setShowRecoveryOption(false);
+      setTimeout(() => setGameState("home"), 3000);
     }
-  }
+  };
 
   // Adaptive polling with circuit breaker
   useEffect(() => {
     if (gameState !== "home") {
-      const baseInterval = gameState === "playing" ? 2000 : 3000
-      const errorMultiplier = Math.min(consecutiveErrors * 0.5 + 1, 3)
-      const interval = baseInterval * errorMultiplier
+      const baseInterval = gameState === "playing" ? 2000 : 3000;
+      const errorMultiplier = Math.min(consecutiveErrors * 0.5 + 1, 3);
+      const interval = baseInterval * errorMultiplier;
 
-      console.log(`Polling every ${interval}ms (errors: ${consecutiveErrors})`)
+      console.log(`Polling every ${interval}ms (errors: ${consecutiveErrors})`);
 
-      const pollInterval = setInterval(pollRoomUpdates, interval)
-      return () => clearInterval(pollInterval)
+      const pollInterval = setInterval(pollRoomUpdates, interval);
+      return () => clearInterval(pollInterval);
     }
-  }, [gameState, pollRoomUpdates, consecutiveErrors])
+  }, [gameState, pollRoomUpdates, consecutiveErrors]);
 
   // Ping to keep connection alive during game
   useEffect(() => {
     if (gameState === "playing" && currentPlayer) {
       const pingInterval = setInterval(async () => {
-        await apiCall("ping", {}, currentPlayer.id)
-      }, 30000)
+        await apiCall("ping", {}, currentPlayer.id);
+      }, 30000);
 
-      return () => clearInterval(pingInterval)
+      return () => clearInterval(pingInterval);
     }
-  }, [gameState, currentPlayer])
+  }, [gameState, currentPlayer]);
 
   // Generate random room ID
   const generateRoomId = () => {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    let result = ""
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let result = "";
     for (let i = 0; i < 6; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length))
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    return result
-  }
+    return result;
+  };
 
   // Create room
   const createRoom = async () => {
-    if (!playerName.trim()) return
+    if (!playerName.trim()) return;
 
-    const newRoomId = generateRoomId()
-    const playerId = `player-${Date.now()}`
+    const newRoomId = generateRoomId();
+    const playerId = `player-${Date.now()}`;
 
-    console.log(`Creating room ${newRoomId} with player ${playerId}`)
+    console.log(`Creating room ${newRoomId} with player ${playerId}`);
 
     const player: Player = {
       id: playerId,
@@ -355,54 +368,54 @@ export default function LanguageQuizGame() {
       ready: false,
       score: 0,
       isHost: true,
-    }
+    };
 
     try {
-      setConnectionError("Creating room...")
+      setConnectionError("Creating room...");
 
-      console.log("Creating room...")
-      const createResult = await apiCall("create", {}, playerId, newRoomId)
-      console.log("Create result:", createResult)
+      console.log("Creating room...");
+      const createResult = await apiCall("create", {}, playerId, newRoomId);
+      console.log("Create result:", createResult);
 
       if (createResult.error) {
-        console.error("Failed to create room:", createResult.error)
-        setConnectionError(`Failed to create room: ${createResult.error}`)
-        return
+        console.error("Failed to create room:", createResult.error);
+        setConnectionError(`Failed to create room: ${createResult.error}`);
+        return;
       }
 
-      console.log("Joining room...")
-      const joinResult = await apiCall("join", { name: playerName.trim(), isHost: true }, playerId, newRoomId)
-      console.log("Join result:", joinResult)
+      console.log("Joining room...");
+      const joinResult = await apiCall("join", { name: playerName.trim(), isHost: true }, playerId, newRoomId);
+      console.log("Join result:", joinResult);
 
       if (joinResult?.room) {
-        setRoomId(newRoomId)
-        const serverPlayer = joinResult.room.players.find((p: Player) => p.id === playerId)
-        console.log("Server player data:", serverPlayer)
-        setCurrentPlayer(serverPlayer || player)
-        setGameState("lobby")
-        setIsConnected(true)
-        setPlayers(joinResult.room.players)
-        setConnectionError(null)
-        setConsecutiveErrors(0)
-        console.log("Room created successfully with players:", joinResult.room.players)
+        setRoomId(newRoomId);
+        const serverPlayer = joinResult.room.players.find((p: Player) => p.id === playerId);
+        console.log("Server player data:", serverPlayer);
+        setCurrentPlayer(serverPlayer || player);
+        setGameState("lobby");
+        setIsConnected(true);
+        setPlayers(joinResult.room.players);
+        setConnectionError(null);
+        setConsecutiveErrors(0);
+        console.log("Room created successfully with players:", joinResult.room.players);
       } else {
-        console.error("Failed to join room after creation")
-        setConnectionError(`Failed to create room: ${joinResult?.error || "Unknown error"}`)
+        console.error("Failed to join room after creation");
+        setConnectionError(`Failed to create room: ${joinResult?.error || "Unknown error"}`);
       }
     } catch (error) {
-      console.error("Error creating room:", error)
-      setConnectionError(`Failed to create room: ${error.message}`)
+      console.error("Error creating room:", error);
+      setConnectionError(`Failed to create room: ${error.message}`);
     }
-  }
+  };
 
   // Join room
   const joinRoom = async () => {
-    if (!playerName.trim() || !roomId.trim()) return
+    if (!playerName.trim() || !roomId.trim()) return;
 
-    const playerId = `player-${Date.now()}`
-    const targetRoomId = roomId.trim()
+    const playerId = `player-${Date.now()}`;
+    const targetRoomId = roomId.trim();
 
-    console.log(`Joining room ${targetRoomId} with player ${playerId}`)
+    console.log(`Joining room ${targetRoomId} with player ${playerId}`);
 
     const player: Player = {
       id: playerId,
@@ -411,132 +424,150 @@ export default function LanguageQuizGame() {
       ready: false,
       score: 0,
       isHost: false,
-    }
+    };
 
     try {
-      setConnectionError("Joining room...")
+      setConnectionError("Joining room...");
 
-      console.log("Attempting to join room...")
-      const result = await apiCall("join", { name: playerName.trim() }, playerId, targetRoomId)
-      console.log("Join result:", result)
+      console.log("Attempting to join room...");
+      const result = await apiCall("join", { name: playerName.trim() }, playerId, targetRoomId);
+      console.log("Join result:", result);
 
       if (!result || result.error) {
-        console.error("Join failed:", result?.error)
-        setConnectionError(`Failed to join room: ${result?.error || "Unknown error"}. Please check the room ID.`)
-        return
+        console.error("Join failed:", result?.error);
+        setConnectionError(`Failed to join room: ${result?.error || "Unknown error"}. Please check the room ID.`);
+        return;
       }
 
       if (result.room) {
-        setCurrentPlayer(player)
-        setGameState("lobby")
-        setIsConnected(true)
-        setPlayers(result.room.players)
-        setConnectionError(null)
-        setConsecutiveErrors(0)
+        setCurrentPlayer(player);
+        setGameState("lobby");
+        setIsConnected(true);
+        setPlayers(result.room.players);
+        setConnectionError(null);
+        setConsecutiveErrors(0);
 
-        const serverPlayer = result.room.players.find((p: Player) => p.id === playerId)
+        const serverPlayer = result.room.players.find((p: Player) => p.id === playerId);
         if (serverPlayer) {
-          setCurrentPlayer(serverPlayer)
-          console.log("Successfully joined room with players:", result.room.players)
+          setCurrentPlayer(serverPlayer);
+          console.log("Successfully joined room with players:", result.room.players);
         }
       }
     } catch (error) {
-      console.error("Error joining room:", error)
-      setConnectionError(`Failed to join room: ${error.message}`)
+      console.error("Error joining room:", error);
+      setConnectionError(`Failed to join room: ${error.message}`);
     }
-  }
+  };
 
   const leaveRoom = async () => {
     if (currentPlayer) {
-      await apiCall("leave")
+      await apiCall("leave");
     }
 
     if (eventSource) {
-      eventSource.close()
-      setEventSource(null)
+      eventSource.close();
+      setEventSource(null);
     }
 
-    setGameState("home")
-    setPlayers([])
-    setCurrentPlayer(null)
-    setRoomId("")
-    setPlayerName("")
-    setIsConnected(false)
-    setConnectionError(null)
-    setConsecutiveErrors(0)
-    setServerInfo(null)
-  }
+    setGameState("home");
+    setPlayers([]);
+    setCurrentPlayer(null);
+    setRoomId("");
+    setPlayerName("");
+    setIsConnected(false);
+    setConnectionError(null);
+    setConsecutiveErrors(0);
+    setServerInfo(null);
+    setStartGameError(null);
+  };
 
   // Update player language
   const updateLanguage = async (language: Language) => {
-    if (!currentPlayer) return
-    const result = await apiCall("update-language", { language })
+    if (!currentPlayer) return;
+    const result = await apiCall("update-language", { language });
     if (result?.room) {
-      setPlayers(result.room.players)
-      const updatedPlayer = result.room.players.find((p: Player) => p.id === currentPlayer.id)
+      setPlayers(result.room.players);
+      const updatedPlayer = result.room.players.find((p: Player) => p.id === currentPlayer.id);
       if (updatedPlayer) {
-        setCurrentPlayer(updatedPlayer)
+        setCurrentPlayer(updatedPlayer);
       }
     }
-  }
+  };
 
   // Toggle ready status
   const toggleReady = async () => {
-    if (!currentPlayer || !currentPlayer.language) return
-    const result = await apiCall("toggle-ready")
+    if (!currentPlayer || !currentPlayer.language) return;
+    const result = await apiCall("toggle-ready");
     if (result?.room) {
-      setPlayers(result.room.players)
-      const updatedPlayer = result.room.players.find((p: Player) => p.id === currentPlayer.id)
+      setPlayers(result.room.players);
+      const updatedPlayer = result.room.players.find((p: Player) => p.id === currentPlayer.id);
       if (updatedPlayer) {
-        setCurrentPlayer(updatedPlayer)
+        setCurrentPlayer(updatedPlayer);
       }
     }
-  }
+  };
 
-  // Start game
+  // Start game with error handling
   const startGame = async () => {
-    if (!currentPlayer?.isHost) return
-    await apiCall("start-game")
-  }
+    if (!currentPlayer?.isHost) {
+      console.log("Start game blocked: Current player is not host", { currentPlayer });
+      setStartGameError("Only the host can start the game.");
+      return;
+    }
+
+    console.log("Attempting to start game", { playerId: currentPlayer.id, isHost: currentPlayer.isHost });
+    setIsStartingGame(true);
+    setStartGameError(null);
+
+    const result = await apiCall("start-game");
+    setIsStartingGame(false);
+
+    if (result?.error) {
+      console.error("Failed to start game:", result.error);
+      setStartGameError(result.error);
+    } else {
+      console.log("Start game API call successful:", result);
+    }
+  };
 
   // Handle answer selection
   const selectAnswer = async (answer: string) => {
-    if (selectedAnswer || !currentQuestion || !currentPlayer) return
+    if (selectedAnswer || !currentQuestion || !currentPlayer) return;
 
-    setSelectedAnswer(answer)
-    setShowResult(true)
+    setSelectedAnswer(answer);
+    setShowResult(true);
 
-    await apiCall("answer", { answer, timeLeft })
-  }
+    await apiCall("answer", { answer, timeLeft });
+  };
 
   // Timer effect
   useEffect(() => {
     if (gameState === "playing" && timeLeft > 0 && !selectedAnswer) {
-      const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000)
-      return () => clearTimeout(timer)
+      const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
+      return () => clearTimeout(timer);
     } else if (timeLeft === 0 && !selectedAnswer && gameState === "playing") {
-      setShowResult(true)
+      setShowResult(true);
     }
-  }, [gameState, timeLeft, selectedAnswer])
+  }, [gameState, timeLeft, selectedAnswer]);
 
   // Restart game
   const restartGame = async () => {
-    if (!currentPlayer?.isHost) return
-    await apiCall("restart")
-  }
+    if (!currentPlayer?.isHost) return;
+    await apiCall("restart");
+  };
 
   // Connection status indicator
   const getConnectionStatus = () => {
     if (consecutiveErrors > 3) {
-      return { icon: WifiOff, color: "text-red-500", text: "Poor Connection" }
+      return { icon: WifiOff, color: "text-red-500", text: "Poor Connection" };
     } else if (consecutiveErrors > 0) {
-      return { icon: AlertTriangle, color: "text-yellow-500", text: "Connection Issues" }
+      return { icon: AlertTriangle, color: "text-yellow-500", text: "Connection Issues" };
     } else {
-      return { icon: Wifi, color: "text-green-500", text: "Connected" }
+      return { icon: Wifi, color: "text-green-500", text: "Connected" };
     }
-  }
+  };
 
-  const connectionStatus = getConnectionStatus()
+  const connectionStatus = getConnectionStatus();
 
   // Home Screen
   if (gameState === "home") {
@@ -599,14 +630,14 @@ export default function LanguageQuizGame() {
           </CardContent>
         </Card>
       </div>
-    )
+    );
   }
 
   // Lobby Screen
   if (gameState === "lobby") {
-    const playersWithLanguages = players.filter((p) => p.language)
-    const allPlayersWithLanguagesReady = playersWithLanguages.length > 0 && playersWithLanguages.every((p) => p.ready)
-    const canStartGame = currentPlayer?.isHost && allPlayersWithLanguagesReady
+    const playersWithLanguages = players.filter((p) => p.language);
+    const allPlayersWithLanguagesReady = playersWithLanguages.length > 0 && playersWithLanguages.every((p) => p.ready);
+    const canStartGame = currentPlayer?.isHost && allPlayersWithLanguagesReady;
 
     console.log("Lobby debug:", {
       currentPlayer,
@@ -615,7 +646,7 @@ export default function LanguageQuizGame() {
       playersWithLanguages,
       allPlayersWithLanguagesReady,
       players,
-    })
+    });
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
@@ -647,6 +678,11 @@ export default function LanguageQuizGame() {
                       Try to Recover Room
                     </Button>
                   )}
+                </div>
+              )}
+              {startGameError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm mb-4">
+                  Error starting game: {startGameError}
                 </div>
               )}
 
@@ -712,19 +748,26 @@ export default function LanguageQuizGame() {
               </Button>
 
               {currentPlayer?.isHost && (
-                <Button onClick={startGame} className="w-full" disabled={!canStartGame} variant="outline">
-                  {playersWithLanguages.length === 0
+                <Button
+                  onClick={startGame}
+                  className="w-full"
+                  disabled={!canStartGame || isStartingGame}
+                  variant="outline"
+                >
+                  {isStartingGame
+                    ? "Starting..."
+                    : playersWithLanguages.length === 0
                     ? "At least one player needs to select a language"
                     : !allPlayersWithLanguagesReady
-                      ? "All players with languages must be ready"
-                      : "Start Game"}
+                    ? "All players with languages must be ready"
+                    : "Start Game"}
                 </Button>
               )}
             </CardContent>
           </Card>
         </div>
       </div>
-    )
+    );
   }
 
   // Game Screen
@@ -786,15 +829,15 @@ export default function LanguageQuizGame() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {currentQuestion.options.map((option, index) => {
-              let buttonClass = "h-16 text-lg font-medium"
+              let buttonClass = "h-16 text-lg font-medium";
 
               if (showResult) {
                 if (option === currentQuestion.correctAnswer) {
-                  buttonClass += " bg-green-500 hover:bg-green-500 text-white"
+                  buttonClass += " bg-green-500 hover:bg-green-500 text-white";
                 } else if (option === selectedAnswer && option !== currentQuestion.correctAnswer) {
-                  buttonClass += " bg-red-500 hover:bg-red-500 text-white"
+                  buttonClass += " bg-red-500 hover:bg-red-500 text-white";
                 } else {
-                  buttonClass += " opacity-50"
+                  buttonClass += " opacity-50";
                 }
               }
 
@@ -808,7 +851,7 @@ export default function LanguageQuizGame() {
                 >
                   {option}
                 </Button>
-              )
+              );
             })}
           </div>
 
@@ -836,7 +879,7 @@ export default function LanguageQuizGame() {
           )}
         </div>
       </div>
-    )
+    );
   }
 
   // Winner Screen
@@ -875,8 +918,8 @@ export default function LanguageQuizGame() {
           </CardContent>
         </Card>
       </div>
-    )
+    );
   }
 
-  return null
+  return null;
 }
