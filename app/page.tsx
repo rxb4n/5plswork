@@ -24,7 +24,7 @@ interface Player {
 }
 
 interface Question {
-  questionId: string; // Added for unique question tracking
+  questionId: string;
   english: string;
   correctAnswer: string;
   options: string[];
@@ -74,7 +74,7 @@ export default function LanguageQuizGame() {
   const [isStartingGame, setIsStartingGame] = useState(false);
   const [startGameError, setStartGameError] = useState<string | null>(null);
   const [creatorId, setCreatorId] = useState<string | null>(null);
-  const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(null); // Track current question ID
+  const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(null);
 
   // Normalize server room to client expected format
   const normalizeRoom = (serverRoom: ServerRoom): {
@@ -600,22 +600,10 @@ export default function LanguageQuizGame() {
     } else {
       console.log("Start game succeeded:", result);
       setGameState("playing");
-      // Poll multiple times to ensure question sync
+      // Poll to ensure question sync
       for (let i = 0; i < 5; i++) {
         await new Promise((resolve) => setTimeout(resolve, i * 1000));
         await pollRoomUpdates();
-        if (
-          result.room?.game_state === "playing" &&
-          updatedPlayers.find((p: Player) => p.id === currentPlayer.id)?.currentQuestion
-        ) {
-          const newQuestion = updatedPlayers.find((p: Player) => p.id === currentPlayer.id)?.currentQuestion;
-          setCurrentQuestion(newQuestion);
-          setCurrentQuestionId(newQuestion?.questionId);
-          setTimeLeft(10);
-          setSelectedAnswer(null);
-          setShowResult(false);
-          break;
-        }
       }
     }
   };
@@ -778,14 +766,14 @@ export default function LanguageQuizGame() {
                     {connectionError}
                   </div>
                   {showRecoveryOption && (
-                    <Button onClick={attemptRoomRecovery} size="sm" variant="outline" className="mt PROMO-2">
+                    <Button onClick={attemptRoomRecovery} size="sm" variant="outline" className="mt-2">
                       Try to Recover Room
                     </Button>
-                  );
+                  )}
                 </div>
               )}
               {startGameError && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm mb-4">
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm mb-4">
                   Error starting game: {startGameError}
                 </div>
               )}
@@ -798,7 +786,7 @@ export default function LanguageQuizGame() {
 
               <div className="space-y-3">
                 {players.map((player) => (
-                  <div key={player.id} className="flex items-center justify-between p-4 bg-gray-100 rounded">
+                  <div key={player.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                     <div className="flex items-center gap-2">
                       {player.isHost && <Crown className="w-4 h-4 text-yellow-500" />}
                       <span className="font-medium">{player.name}</span>
@@ -810,7 +798,7 @@ export default function LanguageQuizGame() {
                           {player.language.charAt(0).toUpperCase() + player.language.slice(1)}
                         </Badge>
                       )}
-                      {player.ready && <Badge className="bg-green-600">Ready</Badge>}
+                      {player.ready && <Badge className="bg-green-500">Ready</Badge>}
                     </div>
                   </div>
                 ))}
@@ -824,7 +812,7 @@ export default function LanguageQuizGame() {
               <CardDescription>Choose your language and get ready!</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Button onClick={leaveRoom} className="w-full" variant="destructive">
+              <Button onClick={leaveRoom} variant="destructive" className="w-full">
                 Leave Room
               </Button>
 
@@ -832,7 +820,7 @@ export default function LanguageQuizGame() {
                 <label className="text-sm font-medium mb-2 block">Select Language to Learn</label>
                 <Select value={currentPlayer?.language || ""} onValueChange={updateLanguage}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select a language" />
+                    <SelectValue placeholder="Choose a language" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="french">French</SelectItem>
@@ -846,8 +834,8 @@ export default function LanguageQuizGame() {
 
               <Button
                 onClick={toggleReady}
-                disabled={!currentPlayer?.language}
                 className="w-full"
+                disabled={!currentPlayer?.language}
                 variant={currentPlayer?.ready ? "secondary" : "default"}
               >
                 {currentPlayer?.ready ? "Not Ready" : "Ready Up!"}
@@ -863,9 +851,9 @@ export default function LanguageQuizGame() {
                   {isStartingGame
                     ? "Starting..."
                     : playersWithLanguages.length === 0
-                    ? "At least one player needs a language"
+                    ? "At least one player needs to select a language"
                     : !allPlayersWithLanguagesReady
-                    ? "All players must be ready"
+                    ? "All players with languages must be ready"
                     : "Start Game"}
                 </Button>
               )}
@@ -909,25 +897,25 @@ export default function LanguageQuizGame() {
             <>
               <div className="flex justify-between items-start">
                 <div className="flex items-center gap-4">
-                  <Badge className="text-lg font-bold px-3 py-1">Score: {currentPlayer?.score || 0}</Badge>
-                  <Badge variant="outline" className="text-lg font-medium px-3 py-1">
+                  <Badge className="text-lg px-3 py-1">Your Score: {currentPlayer?.score || 0}</Badge>
+                  <Badge variant="outline" className="text-lg px-3 py-1">
                     Target: 100
                   </Badge>
                 </div>
 
-                <div className="flex flex-col items-end gap-2">
+                <div className="flex flex-col gap-2">
                   <div className="flex items-center gap-2 mb-2">
                     <Clock className="w-5 h-5" />
                     <span className="text-xl font-bold">{timeLeft}s</span>
                   </div>
-                  <div className="space-y-1 text-right">
-                    {players.map((player, => (
-                      <div key={player.id} className="flex items-center justify-end gap-2 text-sm">
-                        {player.isHost && <Crown className="w-3 h-3 text-yellow-400" />}
+                  <div className="space-y-1">
+                    {players.map((player) => (
+                      <div key={player.id} className="flex items-center gap-2 text-sm">
+                        {player.isHost && <Crown className="w-3 h-3 text-yellow-500" />}
                         <span className={`font-medium ${player.id === currentPlayer?.id ? "text-blue-600" : ""}`}>
                           {player.name}
                         </span>
-                        <Badge className={player.id === currentPlayer?.id ? "bg-blue-500" : "bg-gray-200"} class="text-xs">
+                        <Badge variant={player.id === currentPlayer?.id ? "default" : "secondary"} className="text-xs">
                           {player.score}
                         </Badge>
                       </div>
@@ -941,9 +929,7 @@ export default function LanguageQuizGame() {
               <Card>
                 <CardHeader className="text-center">
                   <CardTitle className="text-3xl font-bold text-blue-700">{currentQuestion.english}</CardTitle>
-                  <CardDescription>
-                    Select the correct translation in {currentPlayer?.language}
-                  </CardDescription>
+                  <CardDescription>Select the correct translation in {currentPlayer?.language}</CardDescription>
                 </CardHeader>
               </Card>
 
@@ -1042,6 +1028,6 @@ export default function LanguageQuizGame() {
       </div>
     );
   }
-  
+
   return null;
-};
+}
