@@ -220,6 +220,7 @@ export default function LanguageQuizGame() {
               setTimeLeft(10);
               setSelectedAnswer(null);
               setShowResult(false);
+              console.log("✅ Question loaded and game started!");
             } else {
               setConnectionError("Failed to load question");
             }
@@ -515,7 +516,7 @@ export default function LanguageQuizGame() {
       data: { 
         answer, 
         timeLeft,
-        questionId: currentQuestion.questionId 
+        correctAnswer: currentQuestion.correctAnswer
       } 
     }, (response: any) => {
       console.log("Answer response:", response);
