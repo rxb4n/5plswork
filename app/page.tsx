@@ -329,7 +329,7 @@ export default function LanguageQuizGame() {
     }
   };
 
-  // Initialize Socket.IO connection
+  // FIXED: Initialize Socket.IO connection with proper cleanup
   useEffect(() => {
     console.log("Initializing Socket.IO connection...")
     
@@ -392,8 +392,10 @@ export default function LanguageQuizGame() {
         gameState: room.gameState,
         playerCount: room.players.length,
         targetScore: room.targetScore,
+        players: room.players.map(p => ({ id: p.id, name: p.name }))
       });
 
+      // CRITICAL: Update players list immediately to reflect changes
       setPlayers(room.players);
       setConnectionError(null);
       setConsecutiveErrors(0);
@@ -501,7 +503,7 @@ export default function LanguageQuizGame() {
       newSocket.disconnect();
       setSocket(null);
     };
-  }, []);
+  }, []); // CRITICAL: Empty dependency array to prevent recreation
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -638,9 +640,9 @@ export default function LanguageQuizGame() {
     });
   };
 
-  // FIXED: Leave room with proper cleanup and immediate UI update
+  // FIXED: Leave room with complete state reset and socket cleanup
   const leaveRoom = () => {
-    console.log("🚪 Leaving room...");
+    console.log("🚪 Leaving room - starting complete cleanup...");
     
     // IMMEDIATE UI cleanup - don't wait for server response
     stopIndividualTimer();
@@ -651,18 +653,22 @@ export default function LanguageQuizGame() {
       socket.emit("leave-room", { roomId, playerId: currentPlayerId.current });
     }
 
-    // Disconnect socket
+    // CRITICAL: Completely disconnect and reset socket to allow fresh connections
     if (socket) {
+      console.log("Disconnecting socket...");
+      socket.removeAllListeners(); // Remove all event listeners
       socket.disconnect();
       setSocket(null);
+      socketRef.current = null;
     }
 
-    // IMMEDIATE state reset - don't wait for server
+    // IMMEDIATE and COMPLETE state reset
+    console.log("Resetting all game state...");
     setGameState("home");
     setPlayers([]);
     setCurrentPlayer(null);
     setRoomId("");
-    setPlayerName("");
+    // DON'T reset playerName - user should be able to rejoin with same name
     setIsConnected(false);
     setConnectionError(null);
     setConsecutiveErrors(0);
@@ -675,11 +681,18 @@ export default function LanguageQuizGame() {
     setIsStartingGame(false);
     setSelectedAnswer(null);
     setShowResult(false);
+    setWinner(null);
+    setShowRecoveryOption(false);
+    
+    // Reset all refs
     lastProcessedQuestionId.current = null;
     currentPlayerId.current = null;
     currentRoomId.current = null;
+    questionStartTime.current = null;
+    isProcessingAnswer.current = false;
+    ignoreRoomUpdates.current = false;
     
-    console.log("✅ Left room and reset all state");
+    console.log("✅ Complete cleanup finished - ready for new connections");
   };
 
   // Update player language
@@ -881,7 +894,7 @@ export default function LanguageQuizGame() {
                   {connectionStatus.text}
                 </Badge>
               </CardTitle>
-              <CardDescription>Players in room</CardDescription>
+              <CardDescription>Players in room ({players.length})</CardDescription>
             </CardHeader>
             <CardContent>
               {connectionError && (
@@ -910,23 +923,29 @@ export default function LanguageQuizGame() {
               )}
 
               <div className="space-y-3">
-                {players.map((player) => (
-                  <div key={player.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      {player.isHost && <Crown className="w-4 h-4 text-yellow-500" />}
-                      <span className="font-medium">{player.name}</span>
-                      {player.isHost && <span className="text-xs text-gray-500">(Host)</span>}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {player.language && (
-                        <Badge variant="secondary">
-                          {player.language.charAt(0).toUpperCase() + player.language.slice(1)}
-                        </Badge>
-                      )}
-                      {player.ready && <Badge className="bg-green-500">Ready</Badge>}
-                    </div>
+                {players.length === 0 ? (
+                  <div className="text-center text-gray-500 py-4">
+                    No players in room
                   </div>
-                ))}
+                ) : (
+                  players.map((player) => (
+                    <div key={player.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        {player.isHost && <Crown className="w-4 h-4 text-yellow-500" />}
+                        <span className="font-medium">{player.name}</span>
+                        {player.isHost && <span className="text-xs text-gray-500">(Host)</span>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {player.language && (
+                          <Badge variant="secondary">
+                            {player.language.charAt(0).toUpperCase() + player.language.slice(1)}
+                          </Badge>
+                        )}
+                        {player.ready && <Badge className="bg-green-500">Ready</Badge>}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
