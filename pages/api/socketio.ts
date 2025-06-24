@@ -20,9 +20,9 @@ async function ensureDbInitialized() {
     try {
       await initDatabase()
       dbInitialized = true
-      console.log("Database initialized successfully")
+      console.log("✅ Database initialized successfully")
     } catch (error) {
-      console.error("Failed to initialize database:", error)
+      console.error("❌ Failed to initialize database:", error)
       throw error
     }
   }
@@ -32,7 +32,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!res.socket.server.io) {
     await ensureDbInitialized()
 
-    console.log("Initializing Socket.IO server...")
+    console.log("🚀 Initializing Socket.IO server...")
 
     const io = new SocketIOServer(res.socket.server, {
       path: "/api/socketio",
@@ -62,11 +62,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }, 10 * 60 * 1000)
 
     io.on("connection", (socket) => {
-      console.log("New Socket.IO connection:", socket.id)
+      console.log("🔌 New Socket.IO connection:", socket.id)
 
       socket.on("create-room", async ({ roomId, playerId, data }, callback) => {
         try {
-          console.log(`Creating room ${roomId} with target score ${data?.targetScore}`)
+          console.log(`🏠 Creating room ${roomId} with target score ${data?.targetScore}`)
           const targetScore = [100, 250, 500].includes(Number(data?.targetScore)) ? Number(data.targetScore) : 100
           const room = await createRoom(roomId, { target_score: targetScore })
           if (!room) {
@@ -75,15 +75,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           socket.join(roomId)
           callback({ room })
           io.to(roomId).emit("room-update", { room })
+          console.log(`✅ Room ${roomId} created successfully`)
         } catch (error) {
-          console.error(`Error creating room ${roomId}:`, error)
+          console.error(`❌ Error creating room ${roomId}:`, error)
           callback({ error: "Failed to create room", status: 500 })
         }
       })
 
       socket.on("join-room", async ({ roomId, playerId, data }, callback) => {
         try {
-          console.log(`Player ${playerId} joining room ${roomId}`)
+          console.log(`👤 Player ${playerId} joining room ${roomId}`)
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
@@ -105,15 +106,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
+          console.log(`✅ Player ${playerId} joined room ${roomId}`)
         } catch (error) {
-          console.error(`Error joining room ${roomId}:`, error)
+          console.error(`❌ Error joining room ${roomId}:`, error)
           callback({ error: "Failed to join room", status: 500 })
         }
       })
 
       socket.on("update-language", async ({ roomId, playerId, data }, callback) => {
         try {
-          console.log(`Updating language for player ${playerId} to ${data.language}`)
+          console.log(`🌐 Updating language for player ${playerId} to ${data.language}`)
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
@@ -133,15 +135,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
+          console.log(`✅ Language updated for player ${playerId}`)
         } catch (error) {
-          console.error(`Error updating language for player ${playerId}:`, error)
+          console.error(`❌ Error updating language for player ${playerId}:`, error)
           callback({ error: "Failed to update language", status: 500 })
         }
       })
 
       socket.on("toggle-ready", async ({ roomId, playerId }, callback) => {
         try {
-          console.log(`Toggling ready for player ${playerId}`)
+          console.log(`⚡ Toggling ready for player ${playerId}`)
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
@@ -160,15 +163,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
+          console.log(`✅ Ready toggled for player ${playerId}`)
         } catch (error) {
-          console.error(`Error toggling ready for player ${playerId}:`, error)
+          console.error(`❌ Error toggling ready for player ${playerId}:`, error)
           callback({ error: "Failed to toggle ready status", status: 500 })
         }
       })
 
       socket.on("update-target-score", async ({ roomId, playerId, data }, callback) => {
         try {
-          console.log(`Updating target score for room ${roomId} to ${data.targetScore}`)
+          console.log(`🎯 Updating target score for room ${roomId} to ${data.targetScore}`)
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
@@ -188,13 +192,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
+          console.log(`✅ Target score updated to ${targetScore}`)
         } catch (error) {
-          console.error(`Error updating target score for room ${roomId}:`, error)
+          console.error(`❌ Error updating target score for room ${roomId}:`, error)
           callback({ error: "Failed to update target score", status: 500 })
         }
       })
 
-      // SIMPLIFIED: Start game handler - just changes room state
+      // SIMPLIFIED: Start game handler - just changes room state to "playing"
       socket.on("start-game", async ({ roomId, playerId }, callback) => {
         try {
           console.log(`🎮 Starting game - Room: ${roomId}, Host: ${playerId}`)
@@ -226,7 +231,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
           console.log(`✅ Pre-flight checks passed, updating room state to playing`)
 
-          // Simply update room to playing state - questions will be fetched by client
+          // Simply update room to playing state - questions will be fetched by client via API
           const roomUpdateSuccess = await updateRoom(roomId, { game_state: "playing", question_count: 0 })
           if (!roomUpdateSuccess) {
             console.log(`❌ Failed to update room state`)
@@ -244,10 +249,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // Answer handler - simplified
+      // SIMPLIFIED: Answer handler - just updates score, no question management
       socket.on("answer", async ({ roomId, playerId, data }, callback) => {
         try {
-          console.log(`Processing answer for player ${playerId}`)
+          console.log(`📝 Processing answer for player ${playerId}`)
           
           const room = await getRoom(roomId)
           if (!room) {
@@ -270,9 +275,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             // Correct answer: award points based on speed
             const pointsChange = Math.max(1, Math.round(10 - (10 - timeLeft)))
             newScore = player.score + pointsChange
+            console.log(`✅ Correct answer! Player ${playerId} earned ${pointsChange} points`)
           } else {
             // Wrong answer or timeout: apply -5 penalty
             newScore = Math.max(0, player.score - 5) // Don't go below 0
+            console.log(`❌ Wrong answer/timeout! Player ${playerId} loses 5 points`)
           }
           
           // Update player score
@@ -280,6 +287,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           
           // Check if player won
           if (newScore >= room.target_score && newScore > 0) {
+            console.log(`🏆 Player ${playerId} reached target score ${room.target_score}`)
             await updateRoom(roomId, { game_state: "finished", winner_id: playerId })
             const finalRoom = await getRoom(roomId)
             callback({ room: finalRoom })
@@ -290,8 +298,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
+          console.log(`✅ Answer processed for player ${playerId}, new score: ${newScore}`)
         } catch (error) {
-          console.error(`Error processing answer for player ${playerId}:`, error)
+          console.error(`❌ Error processing answer for player ${playerId}:`, error)
           callback({ error: "Failed to process answer", status: 500 })
         }
       })
@@ -307,7 +316,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Only the room creator can restart the game", status: 403 })
           }
 
-          console.log(`Restarting game in room ${roomId}`)
+          console.log(`🔄 Restarting game in room ${roomId}`)
           
           await updateRoom(roomId, {
             game_state: "lobby",
@@ -317,14 +326,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           })
           
           for (const p of room.players) {
-            await updatePlayer(p.id, { score: 0, ready: false, current_question: null })
+            await updatePlayer(p.id, { score: 0, ready: false })
           }
 
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
+          console.log(`✅ Game restarted in room ${roomId}`)
         } catch (error) {
-          console.error(`Error restarting game for room ${roomId}:`, error)
+          console.error(`❌ Error restarting game for room ${roomId}:`, error)
           callback({ error: "Failed to restart game", status: 500 })
         }
       })
@@ -332,7 +342,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Leave room handler
       socket.on("leave-room", async ({ roomId, playerId }) => {
         try {
-          console.log(`Player ${playerId} leaving room ${roomId}`)
+          console.log(`🚪 Player ${playerId} leaving room ${roomId}`)
           
           // Remove player from database
           await removePlayerFromRoom(playerId)
@@ -344,7 +354,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const room = await getRoom(roomId)
           
           if (!room || room.players.length === 0) {
-            console.log(`Room ${roomId} is now empty`)
+            console.log(`🏠 Room ${roomId} is now empty`)
             // Notify any remaining clients that room is closed
             io.to(roomId).emit("error", { message: "Room closed", status: 404 })
             return
@@ -352,19 +362,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           
           // Emit room update to remaining players
           io.to(roomId).emit("room-update", { room })
+          console.log(`✅ Player ${playerId} left room ${roomId}`)
         } catch (error) {
-          console.error(`Error handling leave-room for player ${playerId}:`, error)
+          console.error(`❌ Error handling leave-room for player ${playerId}:`, error)
           io.to(roomId).emit("error", { message: "Failed to leave room", status: 500 })
         }
       })
 
       socket.on("disconnect", async () => {
-        console.log("Socket.IO client disconnected:", socket.id)
+        console.log("🔌 Socket.IO client disconnected:", socket.id)
       })
     })
 
     res.socket.server.io = io
-    console.log("Socket.IO server initialized successfully")
+    console.log("✅ Socket.IO server initialized successfully")
   }
 
   res.status(200).end()

@@ -124,64 +124,21 @@ export async function getRoom(roomId: string): Promise<Room | null> {
 
     const room = roomResult.rows[0];
     const players = playersResult.rows.map((p) => {
-      let currentQuestion = null;
-      
-      console.log(`🔍 Processing player ${p.name} (${p.id}) question data:`, {
-        hasCurrentQuestion: !!p.current_question,
-        questionType: typeof p.current_question,
-        questionValue: p.current_question
-      });
-      
-      // CRITICAL FIX: Safely parse the current_question JSON
-      if (p.current_question) {
-        try {
-          if (typeof p.current_question === 'string') {
-            currentQuestion = JSON.parse(p.current_question);
-            console.log(`✅ Parsed question from string for ${p.id}:`, currentQuestion);
-          } else if (typeof p.current_question === 'object') {
-            currentQuestion = p.current_question;
-            console.log(`✅ Using object question for ${p.id}:`, currentQuestion);
-          }
-          
-          // Validate the question structure
-          if (currentQuestion && (!currentQuestion.questionId || !currentQuestion.english || !currentQuestion.correctAnswer || !currentQuestion.options)) {
-            console.warn(`❌ Invalid question structure for player ${p.id}:`, currentQuestion);
-            currentQuestion = null;
-          } else if (currentQuestion) {
-            console.log(`✅ Valid question for ${p.id}: ${currentQuestion.questionId} - "${currentQuestion.english}"`);
-          }
-        } catch (error) {
-          console.error(`❌ Error parsing current_question for player ${p.id}:`, error);
-          currentQuestion = null;
-        }
-      } else {
-        console.log(`ℹ️ No question for player ${p.id}`);
-      }
-
-      const playerData = {
+      // SIMPLIFIED: Don't try to parse questions from database anymore
+      // Questions will be fetched directly by the client via API
+      return {
         id: p.id,
         name: p.name,
         language: p.language,
         ready: p.ready,
         score: p.score,
         is_host: p.is_host,
-        current_question: currentQuestion,
+        current_question: null, // Always null - questions handled by client
         last_seen: p.last_seen,
       };
-
-      console.log(`🔧 Final player data for ${p.id}:`, {
-        name: playerData.name,
-        hasQuestion: !!playerData.current_question,
-        questionId: playerData.current_question?.questionId
-      });
-
-      return playerData;
     });
 
     console.log(`📊 Retrieved room ${roomId} with ${players.length} players`);
-    players.forEach(p => {
-      console.log(`  - ${p.name}: has question = ${!!p.current_question}, questionId = ${p.current_question?.questionId}`);
-    });
 
     return {
       id: room.id,
@@ -222,14 +179,12 @@ export async function addPlayerToRoom(roomId: string, player: Omit<Player, "last
 
     console.log(`Adding player ${player.id} to room ${roomId}. Should be host: ${shouldBeHost}`);
 
-    // Properly serialize the current_question
-    const questionJson = player.current_question ? JSON.stringify(player.current_question) : null;
-
+    // SIMPLIFIED: Don't store questions in database anymore
     await client.query(
       `INSERT INTO players (id, room_id, name, language, ready, score, is_host, current_question)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NULL)
        ON CONFLICT (id) DO UPDATE SET
-       name = $3, last_seen = NOW(), is_host = $7, current_question = $8`,
+       name = $3, last_seen = NOW(), is_host = $7, current_question = NULL`,
       [
         player.id,
         roomId,
@@ -238,7 +193,6 @@ export async function addPlayerToRoom(roomId: string, player: Omit<Player, "last
         player.ready,
         player.score,
         shouldBeHost,
-        questionJson,
       ]
     );
 
@@ -306,18 +260,14 @@ export async function updatePlayer(playerId: string, updates: Partial<Player>): 
     let paramIndex = 2;
 
     Object.entries(updates).forEach(([key, value]) => {
+      // SIMPLIFIED: Skip current_question updates - not stored in DB anymore
       if (key === "current_question") {
-        updateFields.push(`${key} = $${paramIndex}`);
-        // CRITICAL: Properly serialize the question object
-        const questionJson = value ? JSON.stringify(value) : null;
-        values.push(questionJson);
-        console.log(`🔧 Updating player ${playerId} with question:`, value ? `${value.questionId} (${value.english})` : 'null');
-        console.log(`🔧 Serialized question JSON:`, questionJson);
+        return; // Skip question updates
       } else {
         updateFields.push(`${key} = $${paramIndex}`);
         values.push(value);
+        paramIndex++;
       }
-      paramIndex++;
     });
 
     if (updateFields.length === 0) {
