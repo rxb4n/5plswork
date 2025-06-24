@@ -62,6 +62,7 @@ export default function LanguageQuizGame() {
   const [consecutiveErrors, setConsecutiveErrors] = useState(0);
   const [showRecoveryOption, setShowRecoveryOption] = useState(false);
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
+  const [needsNewSocket, setNeedsNewSocket] = useState(false); // NEW: Track when we need a fresh socket
 
   // Game state
   const [gameState, setGameState] = useState<GameState>("home");
@@ -329,9 +330,9 @@ export default function LanguageQuizGame() {
     }
   };
 
-  // FIXED: Initialize Socket.IO connection with proper cleanup
-  useEffect(() => {
-    console.log("Initializing Socket.IO connection...")
+  // FIXED: Create socket connection function
+  const createSocketConnection = () => {
+    console.log("🔌 Creating new Socket.IO connection...");
     
     const newSocket = io({
       path: "/api/socketio",
@@ -346,21 +347,22 @@ export default function LanguageQuizGame() {
     setSocket(newSocket);
 
     newSocket.on("connect", () => {
-      console.log("Socket.IO connected successfully:", newSocket.id);
+      console.log("✅ Socket.IO connected successfully:", newSocket.id);
       setIsConnected(true);
       setConnectionError(null);
       setConsecutiveErrors(0);
+      setNeedsNewSocket(false); // Reset the flag
     });
 
     newSocket.on("disconnect", (reason) => {
-      console.log("Socket.IO disconnected:", reason);
+      console.log("❌ Socket.IO disconnected:", reason);
       setIsConnected(false);
       setConnectionError(`Disconnected: ${reason}. Attempting to reconnect...`);
       setConsecutiveErrors((prev) => prev + 1);
     });
 
     newSocket.on("connect_error", (error) => {
-      console.error("Socket.IO connect error:", error.message);
+      console.error("❌ Socket.IO connect error:", error.message);
       setConnectionError(`Connection error: ${error.message}`);
       setConsecutiveErrors((prev) => prev + 1);
       
@@ -497,13 +499,25 @@ export default function LanguageQuizGame() {
       }
     });
 
-    return () => {
-      console.log("Cleaning up Socket.IO connection");
-      stopIndividualTimer();
-      newSocket.disconnect();
-      setSocket(null);
-    };
-  }, []); // CRITICAL: Empty dependency array to prevent recreation
+    return newSocket;
+  };
+
+  // FIXED: Initialize Socket.IO connection with proper cleanup and recreation
+  useEffect(() => {
+    console.log("🔌 Socket connection effect triggered");
+    
+    // Only create a new socket if we don't have one or we need a new one
+    if (!socket || needsNewSocket) {
+      console.log("Creating new socket connection...");
+      const newSocket = createSocketConnection();
+      
+      return () => {
+        console.log("🧹 Cleaning up Socket.IO connection");
+        stopIndividualTimer();
+        newSocket.disconnect();
+      };
+    }
+  }, [needsNewSocket]); // CRITICAL: Depend on needsNewSocket flag
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -524,7 +538,10 @@ export default function LanguageQuizGame() {
 
   // Create room
   const createRoom = () => {
-    if (!playerName.trim() || !socket) return;
+    if (!playerName.trim() || !socket) {
+      console.log("❌ Cannot create room - missing name or socket");
+      return;
+    }
 
     const newRoomId = generateRoomId();
     const playerId = `player-${Date.now()}`;
@@ -573,7 +590,10 @@ export default function LanguageQuizGame() {
 
   // Join room
   const joinRoom = () => {
-    if (!playerName.trim() || !roomId.trim() || !socket) return;
+    if (!playerName.trim() || !roomId.trim() || !socket) {
+      console.log("❌ Cannot join room - missing data or socket");
+      return;
+    }
 
     const playerId = `player-${Date.now()}`;
     currentPlayerId.current = playerId;
@@ -640,7 +660,7 @@ export default function LanguageQuizGame() {
     });
   };
 
-  // FIXED: Leave room with complete state reset and socket cleanup
+  // FIXED: Leave room with complete state reset and socket cleanup + fresh connection
   const leaveRoom = () => {
     console.log("🚪 Leaving room - starting complete cleanup...");
     
@@ -653,9 +673,9 @@ export default function LanguageQuizGame() {
       socket.emit("leave-room", { roomId, playerId: currentPlayerId.current });
     }
 
-    // CRITICAL: Completely disconnect and reset socket to allow fresh connections
+    // CRITICAL: Completely disconnect and reset socket
     if (socket) {
-      console.log("Disconnecting socket...");
+      console.log("🔌 Disconnecting socket...");
       socket.removeAllListeners(); // Remove all event listeners
       socket.disconnect();
       setSocket(null);
@@ -663,7 +683,7 @@ export default function LanguageQuizGame() {
     }
 
     // IMMEDIATE and COMPLETE state reset
-    console.log("Resetting all game state...");
+    console.log("🔄 Resetting all game state...");
     setGameState("home");
     setPlayers([]);
     setCurrentPlayer(null);
@@ -691,6 +711,10 @@ export default function LanguageQuizGame() {
     questionStartTime.current = null;
     isProcessingAnswer.current = false;
     ignoreRoomUpdates.current = false;
+    
+    // CRITICAL: Trigger creation of new socket connection
+    console.log("🔌 Triggering new socket connection...");
+    setNeedsNewSocket(true);
     
     console.log("✅ Complete cleanup finished - ready for new connections");
   };
@@ -862,12 +886,34 @@ export default function LanguageQuizGame() {
             </div>
 
             <div className="space-y-2">
-              <Button onClick={joinRoom} className="w-full" disabled={!playerName.trim() || !roomId.trim()}>
-                Join Room
+              <Button 
+                onClick={joinRoom} 
+                className="w-full" 
+                disabled={!playerName.trim() || !roomId.trim() || !socket || !isConnected}
+              >
+                {!socket || !isConnected ? "Connecting..." : "Join Room"}
               </Button>
-              <Button onClick={createRoom} variant="outline" className="w-full" disabled={!playerName.trim()}>
-                Create New Room
+              <Button 
+                onClick={createRoom} 
+                variant="outline" 
+                className="w-full" 
+                disabled={!playerName.trim() || !socket || !isConnected}
+              >
+                {!socket || !isConnected ? "Connecting..." : "Create New Room"}
               </Button>
+            </div>
+
+            {/* Connection Status Display */}
+            <div className="text-center text-sm text-gray-600">
+              <div className="flex items-center justify-center gap-2">
+                <connectionStatus.icon className={`w-4 h-4 ${connectionStatus.color}`} />
+                <span>{connectionStatus.text}</span>
+              </div>
+              {needsNewSocket && (
+                <div className="text-xs text-blue-600 mt-1">
+                  Establishing new connection...
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
