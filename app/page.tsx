@@ -256,6 +256,35 @@ export default function LanguageQuizGame() {
           return newTime;
         });
       }, 1000);
+      const socketInstance = io({
+      path: "/api/socket",
+      transports: ["websocket", "polling"],
+    });
+
+    socketInstance.on("connect", () => {
+      console.log("Connected to Socket.IO server:", socketInstance.id);
+    });
+
+    socketInstance.on("connect_error", (error) => {
+      console.error("Socket.IO connect error:", error);
+    });
+
+    socketInstance.on("room-update", ({ room, serverInfo }) => {
+      console.log("Room updated:", room, serverInfo);
+      // Update state with room data
+    });
+
+    socketInstance.on("error", ({ message, status }) => {
+      console.error("Server error:", message, status);
+      // Handle error (e.g., show toast notification)
+    });
+
+    setSocket(socketInstance);
+
+    return () => {
+      socketInstance.disconnect();
+    };
+    
       return () => {
         isMounted = false;
         console.log(`Cleaning up timer for question ${currentQuestionId}`);
@@ -277,6 +306,8 @@ export default function LanguageQuizGame() {
     }
     return result;
   };
+
+  
 
   // Create room
   const createRoom = () => {
