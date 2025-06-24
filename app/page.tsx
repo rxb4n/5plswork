@@ -384,7 +384,7 @@ export default function LanguageQuizGame() {
           console.log(`Timer tick: ${newTime}s for question ${currentQuestionId}`);
           return newTime;
         });
-      }, 1000);
+      }, 100000);
       return () => {
         isMounted = false;
         console.log(`Cleaning up timer for question ${currentQuestionId}`);
