@@ -49,7 +49,6 @@ interface ServerRoom {
     is_host: boolean;
     current_question: Question | null;
   }>;
-  creator_id: string;
   winner_id: string | null;
   question_count: number | null;
   target_score: number;
@@ -88,7 +87,6 @@ export default function LanguageQuizGame() {
     id: string;
     gameState: string;
     players: Player[];
-    creatorId: string;
     targetScore: number;
   } => ({
     id: serverRoom.id,
@@ -102,18 +100,18 @@ export default function LanguageQuizGame() {
       isHost: p.is_host,
       currentQuestion: p.current_question || undefined,
     })),
-    creatorId: serverRoom.creator_id,
     targetScore: serverRoom.target_score || 100,
   });
 
   // Initialize Socket.IO connection
   useEffect(() => {
     const newSocket = io({
-    path: "/api/socket",
-    transports: ["websocket", "polling"], // Enable polling fallback
-    reconnectionAttempts: 5,
-    reconnectionDelay: 2000,
-  });
+      path: "/api/socketio",
+      transports: ["websocket", "polling"],
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+      timeout: 20000,
+    });
 
     setSocket(newSocket);
 
@@ -155,13 +153,7 @@ export default function LanguageQuizGame() {
         targetScore: room.targetScore,
       });
 
-      // Enforce creator as host
-      const updatedPlayers = room.players.map((p: Player) => ({
-        ...p,
-        isHost: p.id === creatorId,
-      }));
-
-      setPlayers(updatedPlayers);
+      setPlayers(room.players);
       setConnectionError(null);
       setConsecutiveErrors(0);
       setShowRecoveryOption(false);
@@ -171,12 +163,9 @@ export default function LanguageQuizGame() {
         setServerInfo(data.serverInfo);
       }
 
-      const updatedCurrentPlayer = updatedPlayers.find((p: Player) => p.id === currentPlayer?.id);
+      const updatedCurrentPlayer = room.players.find((p: Player) => p.id === currentPlayer?.id);
       if (updatedCurrentPlayer) {
-        setCurrentPlayer({
-          ...updatedCurrentPlayer,
-          isHost: updatedCurrentPlayer.id === creatorId,
-        });
+        setCurrentPlayer(updatedCurrentPlayer);
       }
 
       // Handle game state
@@ -204,7 +193,7 @@ export default function LanguageQuizGame() {
           }
         }
       } else if (room.gameState === "finished" && data.room.winner_id) {
-        const winnerPlayer = updatedPlayers.find((p) => p.id === data.room.winner_id);
+        const winnerPlayer = room.players.find((p) => p.id === data.room.winner_id);
         setWinner(winnerPlayer || null);
         setGameState("finished");
         setWaitingForNewQuestion(true);
@@ -256,45 +245,6 @@ export default function LanguageQuizGame() {
           return newTime;
         });
       }, 1000);
-      const socketInstance = io({
-      path: "/api/socket",
-      transports: ["websocket", "polling"],
-    });
-
-    // page.tsx
-const socket = useMemo(() => {
-    // Connect to the same origin, but specify the path for the Socket.IO server
-    const s = io({
-      path: "/api/socket",
-      transports: ["websocket"],
-      timeout: 60000, // Try increasing this dramatically for testing
-    });
-    // ... rest of your code
-}, []);
-
-    socketInstance.on("connect", () => {
-      console.log("Connected to Socket.IO server:", socketInstance.id);
-    });
-
-    socketInstance.on("connect_error", (error) => {
-      console.error("Socket.IO connect error:", error);
-    });
-
-    socketInstance.on("room-update", ({ room, serverInfo }) => {
-      console.log("Room updated:", room, serverInfo);
-      // Update state with room data
-    });
-
-    socketInstance.on("error", ({ message, status }) => {
-      console.error("Server error:", message, status);
-      // Handle error (e.g., show toast notification)
-    });
-
-    setSocket(socketInstance);
-
-    return () => {
-      socketInstance.disconnect();
-    };
 
       return () => {
         isMounted = false;
@@ -317,8 +267,6 @@ const socket = useMemo(() => {
     }
     return result;
   };
-
-  
 
   // Create room
   const createRoom = () => {
@@ -394,7 +342,7 @@ const socket = useMemo(() => {
         const normalizedRoom = normalizeRoom(response.room);
         setCurrentPlayer({
           ...player,
-          isHost: playerId === normalizedRoom.creatorId,
+          isHost: false,
         });
         setRoomId(targetRoomId);
         setGameState("lobby");
@@ -406,11 +354,7 @@ const socket = useMemo(() => {
 
         const serverPlayer = normalizedRoom.players.find((p: Player) => p.id === playerId);
         if (serverPlayer) {
-          setCurrentPlayer({
-            ...serverPlayer,
-            isHost: playerId === normalizedRoom.creatorId,
-          });
-          setCreatorId(normalizedRoom.creatorId);
+          setCurrentPlayer(serverPlayer);
           console.log("Successfully joined room with players:", normalizedRoom.players);
         }
       }
@@ -472,7 +416,6 @@ const socket = useMemo(() => {
     if (!language || !currentPlayer || !socket) return;
 
     console.log(`Updating language for player ${currentPlayer.id} to ${language}`);
-    const isCreator = currentPlayer.id === creatorId;
     socket.emit("update-language", { roomId, playerId: currentPlayer.id, data: { language } }, (response: any) => {
       if (response?.room) {
         const normalizedRoom = normalizeRoom(response.room);
@@ -480,11 +423,8 @@ const socket = useMemo(() => {
         setTargetScore(normalizedRoom.targetScore);
         const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayer.id);
         if (updatedPlayer) {
-          setCurrentPlayer({
-            ...updatedPlayer,
-            isHost: isCreator,
-          });
-          console.log(`Language updated for player ${currentPlayer.id}, isHost preserved: ${isCreator}`);
+          setCurrentPlayer(updatedPlayer);
+          console.log(`Language updated for player ${currentPlayer.id}`);
         }
       }
     });
@@ -495,7 +435,6 @@ const socket = useMemo(() => {
     if (!currentPlayer || !currentPlayer.language || !socket) return;
 
     console.log(`Toggling ready for player ${currentPlayer.id}`);
-    const isCreator = currentPlayer.id === creatorId;
     socket.emit("toggle-ready", { roomId, playerId: currentPlayer.id }, (response: any) => {
       if (response?.room) {
         const normalizedRoom = normalizeRoom(response.room);
@@ -503,11 +442,8 @@ const socket = useMemo(() => {
         setTargetScore(normalizedRoom.targetScore);
         const updatedPlayer = normalizedRoom.players.find((p) => p.id === currentPlayer.id);
         if (updatedPlayer) {
-          setCurrentPlayer({
-            ...updatedPlayer,
-            isHost: isCreator,
-          });
-          console.log(`Ready toggled for player ${currentPlayer.id}, isHost preserved: ${isCreator}`);
+          setCurrentPlayer(updatedPlayer);
+          console.log(`Ready toggled for player ${currentPlayer.id}`);
         }
       }
     });
@@ -515,7 +451,7 @@ const socket = useMemo(() => {
 
   // Update target score
   const updateTargetScore = (score: number) => {
-    if (!currentPlayer || currentPlayer.id !== creatorId || !socket) return;
+    if (!currentPlayer || !currentPlayer.isHost || !socket) return;
 
     console.log(`Updating target score for room ${roomId} to ${score}`);
     socket.emit("update-target-score", { roomId, playerId: currentPlayer.id, data: { targetScore: score } }, (response: any) => {
@@ -530,13 +466,13 @@ const socket = useMemo(() => {
 
   // Start game
   const startGame = () => {
-    if (!currentPlayer || currentPlayer.id !== creatorId || !socket) {
-      console.log("Start game blocked: Current player is not creator", { currentPlayer, creatorId });
+    if (!currentPlayer || !currentPlayer.isHost || !socket) {
+      console.log("Start game blocked: Current player is not host", { currentPlayer });
       setStartGameError("Only the room creator can start the game.");
       return;
     }
 
-    console.log("Attempting to start game", { playerId: currentPlayer.id, creatorId });
+    console.log("Attempting to start game", { playerId: currentPlayer.id });
     setIsStartingGame(true);
     setStartGameError(null);
 
@@ -573,10 +509,7 @@ const socket = useMemo(() => {
         setTargetScore(normalizedRoom.targetScore);
 
         if (updatedPlayer) {
-          setCurrentPlayer({
-            ...updatedPlayer,
-            isHost: updatedPlayer.id === creatorId,
-          });
+          setCurrentPlayer(updatedPlayer);
         }
 
         if (normalizedRoom.gameState === "finished" && response.room.winner_id) {
@@ -612,7 +545,7 @@ const socket = useMemo(() => {
 
   // Restart game
   const restartGame = () => {
-    if (!currentPlayer || currentPlayer.id !== creatorId || !socket) return;
+    if (!currentPlayer || !currentPlayer.isHost || !socket) return;
     console.log("Restarting game");
     socket.emit("restart", { roomId, playerId: currentPlayer.id }, () => {
       setWaitingForNewQuestion(true);
@@ -702,18 +635,7 @@ const socket = useMemo(() => {
   if (gameState === "lobby") {
     const playersWithLanguages = players.filter((p) => p.language);
     const allPlayersWithLanguagesReady = playersWithLanguages.length > 0 && playersWithLanguages.every((p) => p.ready);
-    const canStartGame = currentPlayer?.id === creatorId && allPlayersWithLanguagesReady;
-
-    console.log("Lobby debug:", {
-      currentPlayer,
-      isCreator: currentPlayer?.id === creatorId,
-      creatorId,
-      canStartGame,
-      playersWithLanguages,
-      allPlayersWithLanguagesReady,
-      players,
-      targetScore,
-    });
+    const canStartGame = currentPlayer?.isHost && allPlayersWithLanguagesReady;
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
@@ -731,9 +653,6 @@ const socket = useMemo(() => {
               <CardDescription>Players in room</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-sm mb-4">
-                Debug: Current player is {currentPlayer?.id === creatorId ? "Creator" : "Not Creator"}
-              </div>
               {connectionError && (
                 <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm mb-4">
                   <div className="flex items-center gap-2 mb-2">
@@ -765,7 +684,7 @@ const socket = useMemo(() => {
                     <div className="flex items-center gap-2">
                       {player.isHost && <Crown className="w-4 h-4 text-yellow-500" />}
                       <span className="font-medium">{player.name}</span>
-                      {player.isHost && <span className="text-xs text-gray-500">(Creator)</span>}
+                      {player.isHost && <span className="text-xs text-gray-500">(Host)</span>}
                     </div>
                     <div className="flex items-center gap-2">
                       {player.language && (
@@ -807,7 +726,7 @@ const socket = useMemo(() => {
                 </Select>
               </div>
 
-              {currentPlayer?.id === creatorId && (
+              {currentPlayer?.isHost && (
                 <div>
                   <label className="text-sm font-medium mb-2 block">Target Score</label>
                   <Select
@@ -835,7 +754,7 @@ const socket = useMemo(() => {
                 {currentPlayer?.ready ? "Not Ready" : "Ready Up!"}
               </Button>
 
-              {currentPlayer?.id === creatorId && (
+              {currentPlayer?.isHost && (
                 <Button
                   onClick={startGame}
                   className="w-full"
@@ -884,7 +803,7 @@ const socket = useMemo(() => {
                 <CardDescription>Please wait while the game prepares the next question.</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
               </CardContent>
             </Card>
           ) : (
@@ -1008,7 +927,7 @@ const socket = useMemo(() => {
                 </div>
               ))}
             </div>
-            {currentPlayer?.id === creatorId && (
+            {currentPlayer?.isHost && (
               <Button onClick={restartGame} className="w-full">
                 Play Again
               </Button>
