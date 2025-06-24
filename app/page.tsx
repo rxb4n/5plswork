@@ -154,7 +154,7 @@ export default function LanguageQuizGame() {
 
       const room = normalizeRoom(data.room);
       
-      console.log("Room update received:", {
+      console.log("🔄 Room update received:", {
         gameState: room.gameState,
         playerCount: room.players.length,
         players: room.players.map(p => ({ 
@@ -180,7 +180,7 @@ export default function LanguageQuizGame() {
       // Find the current player in the updated room data
       const updatedCurrentPlayer = room.players.find((p: Player) => p.id === currentPlayer?.id);
       if (updatedCurrentPlayer) {
-        console.log("Updated current player:", {
+        console.log("🔄 Updated current player:", {
           id: updatedCurrentPlayer.id,
           name: updatedCurrentPlayer.name,
           hasQuestion: !!updatedCurrentPlayer.currentQuestion,
@@ -203,7 +203,7 @@ export default function LanguageQuizGame() {
         setGameState("playing");
         setIsStartingGame(false);
         
-        // FIXED: Simplified question handling logic
+        // CRITICAL FIX: Check for question in the updated player data
         if (updatedCurrentPlayer?.currentQuestion) {
           const newQuestion = updatedCurrentPlayer.currentQuestion;
           const newQuestionId = newQuestion.questionId;
@@ -216,23 +216,16 @@ export default function LanguageQuizGame() {
             optionsCount: newQuestion.options.length
           });
           
-          // CRITICAL FIX: Always set the question when transitioning to playing state
-          // OR when we get a new question ID
-          const shouldSetQuestion = gameState !== "playing" || newQuestionId !== lastProcessedQuestionId.current;
-          
-          if (shouldSetQuestion) {
-            console.log(`✅ Setting question ${newQuestionId} (transition to playing or new question)`);
-            setCurrentQuestion(newQuestion);
-            setCurrentQuestionId(newQuestionId);
-            setTimeLeft(10);
-            setSelectedAnswer(null);
-            setShowResult(false);
-            setWaitingForNewQuestion(false);
-            lastProcessedQuestionId.current = newQuestionId;
-            console.log("✅ Question set successfully!");
-          } else {
-            console.log(`⏭️ Question ${newQuestionId} already processed, skipping`);
-          }
+          // CRITICAL: Always set the question when we have one
+          console.log(`✅ Setting question ${newQuestionId}`);
+          setCurrentQuestion(newQuestion);
+          setCurrentQuestionId(newQuestionId);
+          setTimeLeft(10);
+          setSelectedAnswer(null);
+          setShowResult(false);
+          setWaitingForNewQuestion(false);
+          lastProcessedQuestionId.current = newQuestionId;
+          console.log("✅ Question set successfully!");
         } else {
           console.log("❌ Player has no current question, waiting...");
           setWaitingForNewQuestion(true);
@@ -868,7 +861,7 @@ export default function LanguageQuizGame() {
               <CardContent>
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
                 <div className="mt-4 text-sm text-gray-600">
-                  <p>Debug Info:</p>
+                  <p><strong>Debug Info:</strong></p>
                   <p>Current Question ID: {currentQuestionId || "None"}</p>
                   <p>Waiting for new question: {waitingForNewQuestion ? "Yes" : "No"}</p>
                   <p>Player has question: {currentPlayer?.currentQuestion ? "Yes" : "No"}</p>
