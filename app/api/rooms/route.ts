@@ -13,7 +13,6 @@ import {
   type Player,
 } from "../../../lib/database";
 
-// Initialize database on startup
 let dbInitialized = false;
 
 async function ensureDbInitialized() {
@@ -131,7 +130,6 @@ const WORD_DATABASE = [
   { english: "Light", french: "Lumière", german: "Licht", russian: "свет", japanese: "Hikari", spanish: "Luz" },
 ];
 
-// Counter for generating unique question IDs
 let questionCounter = 0;
 
 function generateQuestion(language: "french" | "german" | "russian" | "japanese" | "spanish") {
@@ -178,7 +176,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Player ID is required" }, { status: 400 });
     }
 
-    if (Math.random() < 0.1) {
+    if (Math.random() < 0.2) { // Increased cleanup frequency
       try {
         await cleanupOldRooms();
       } catch (error) {
@@ -503,14 +501,14 @@ export async function GET(request: NextRequest) {
     await ensureRoomHasHost(roomId);
     const updatedRoom = await getRoom(roomId);
 
-    console.log("GET /api/rooms response:", updatedRoom);
+    console.log("GET / Room:", updatedRoom);
     return NextResponse.json({ room: updatedRoom });
   } catch (error) {
     console.error("GET Error:", error);
     return NextResponse.json(
       {
         error: "Internal server error",
-        details: (error as Error).message,
+        details: error.message,
       },
       { status: 500 }
     );
