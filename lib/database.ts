@@ -158,12 +158,7 @@ export async function getRoom(roomId: string): Promise<Room | null> {
       };
     });
 
-    console.log(`Retrieved room ${roomId} with ${players.length} players:`, players.map(p => ({
-      id: p.id,
-      name: p.name,
-      hasQuestion: !!p.current_question,
-      questionId: p.current_question?.questionId
-    })));
+    console.log(`Retrieved room ${roomId} with ${players.length} players`);
 
     return {
       id: room.id,
@@ -293,7 +288,7 @@ export async function updatePlayer(playerId: string, updates: Partial<Player>): 
         // Properly serialize the question object
         const questionJson = value ? JSON.stringify(value) : null;
         values.push(questionJson);
-        console.log(`Updating player ${playerId} with question:`, value);
+        console.log(`Updating player ${playerId} with question:`, value ? `${value.questionId} (${value.english})` : 'null');
       } else {
         updateFields.push(`${key} = $${paramIndex}`);
         values.push(value);
@@ -309,7 +304,7 @@ export async function updatePlayer(playerId: string, updates: Partial<Player>): 
     }
 
     const query = `UPDATE players SET ${updateFields.join(", ")}, last_seen = NOW() WHERE id = $1`;
-    console.log(`Executing update query for player ${playerId}:`, query, values);
+    console.log(`Executing update query for player ${playerId}:`, query);
     
     const result = await client.query(query, values);
     console.log(`Update result for player ${playerId}: ${result.rowCount} rows affected`);

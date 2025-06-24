@@ -55,28 +55,35 @@ interface ServerRoom {
 }
 
 export default function LanguageQuizGame() {
+  // Socket and connection state
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [consecutiveErrors, setConsecutiveErrors] = useState(0);
+  const [showRecoveryOption, setShowRecoveryOption] = useState(false);
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
+
+  // Game state
   const [gameState, setGameState] = useState<GameState>("home");
   const [playerName, setPlayerName] = useState("");
   const [roomId, setRoomId] = useState("");
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
+  const [targetScore, setTargetScore] = useState(100);
+  const [winner, setWinner] = useState<Player | null>(null);
+  const [creatorId, setCreatorId] = useState<string | null>(null);
+
+  // Question and game flow state
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
+  const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(10);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [showResult, setShowResult] = useState(false);
-  const [winner, setWinner] = useState<Player | null>(null);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
-  const [consecutiveErrors, setConsecutiveErrors] = useState(0);
-  const [showRecoveryOption, setShowRecoveryOption] = useState(false);
+  const [waitingForNewQuestion, setWaitingForNewQuestion] = useState(true);
   const [isStartingGame, setIsStartingGame] = useState(false);
   const [startGameError, setStartGameError] = useState<string | null>(null);
-  const [creatorId, setCreatorId] = useState<string | null>(null);
-  const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(null);
-  const [waitingForNewQuestion, setWaitingForNewQuestion] = useState(true);
-  const [targetScore, setTargetScore] = useState(100);
+
+  // Refs for tracking
   const lastProcessedQuestionId = useRef<string | null>(null);
 
   // Memoize currentQuestion to prevent unnecessary re-renders
@@ -144,6 +151,9 @@ export default function LanguageQuizGame() {
     });
 
     newSocket.on("room-update", (data: { room: ServerRoom; serverInfo?: ServerInfo }) => {
+      console.log("=== ROOM UPDATE RECEIVED ===");
+      console.log("Raw data:", data);
+
       if (!data.room) {
         console.error("Missing room object in room-update");
         setConnectionError("Invalid server response: Missing room data");
@@ -154,14 +164,15 @@ export default function LanguageQuizGame() {
 
       const room = normalizeRoom(data.room);
       
-      console.log("Room update received:", {
+      console.log("Normalized room:", {
         gameState: room.gameState,
         players: room.players.map(p => ({
           id: p.id,
           name: p.name,
           language: p.language,
           hasQuestion: !!p.currentQuestion,
-          questionId: p.currentQuestion?.questionId
+          questionId: p.currentQuestion?.questionId,
+          questionEnglish: p.currentQuestion?.english
         })),
         targetScore: room.targetScore,
       });
@@ -183,7 +194,8 @@ export default function LanguageQuizGame() {
           id: updatedCurrentPlayer.id,
           name: updatedCurrentPlayer.name,
           hasQuestion: !!updatedCurrentPlayer.currentQuestion,
-          questionId: updatedCurrentPlayer.currentQuestion?.questionId
+          questionId: updatedCurrentPlayer.currentQuestion?.questionId,
+          questionEnglish: updatedCurrentPlayer.currentQuestion?.english
         });
         setCurrentPlayer(updatedCurrentPlayer);
       }
@@ -196,18 +208,18 @@ export default function LanguageQuizGame() {
         return;
       }
 
-      // Critical fix: Handle game state transition to playing
+      // Handle transition to playing state
       if (room.gameState === "playing") {
-        console.log("Game state is playing, transitioning to game view");
+        console.log("=== TRANSITIONING TO PLAYING STATE ===");
         setGameState("playing");
-        setIsStartingGame(false); // Clear the starting state
+        setIsStartingGame(false);
         
         // Handle question setup for playing state
         if (updatedCurrentPlayer?.currentQuestion) {
           const newQuestionId = updatedCurrentPlayer.currentQuestion.questionId;
           console.log(`Player has question ${newQuestionId}, setting up game`);
           
-          // Always set the question if we're in playing state and have a question
+          // Set the question immediately
           console.log(`Setting question ${newQuestionId} for playing state`);
           setCurrentQuestion(updatedCurrentPlayer.currentQuestion);
           setCurrentQuestionId(newQuestionId);
@@ -256,6 +268,8 @@ export default function LanguageQuizGame() {
           console.log("New question set during gameplay:", updatedCurrentPlayer.currentQuestion);
         }
       }
+
+      console.log("=== ROOM UPDATE COMPLETE ===");
     });
 
     newSocket.on("error", (data: { message: string; status?: number }) => {
@@ -525,6 +539,7 @@ export default function LanguageQuizGame() {
       return;
     }
 
+    console.log("=== STARTING GAME ===");
     console.log("Attempting to start game", { playerId: currentPlayer.id });
     setIsStartingGame(true);
     setStartGameError(null);
@@ -538,7 +553,6 @@ export default function LanguageQuizGame() {
         setIsStartingGame(false);
       } else {
         console.log("Start game succeeded");
-        // Don't set game state here - let the room-update handler do it
         setWaitingForNewQuestion(true);
         lastProcessedQuestionId.current = null;
       }
@@ -857,13 +871,20 @@ export default function LanguageQuizGame() {
                 <CardDescription>Please wait while the game prepares the next question.</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-                <div className="mt-4 text-sm text-gray-600">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                <div className="text-sm text-gray-600 space-y-2">
+                  <p><strong>Debug Information:</strong></p>
                   <p>Current Question ID: {currentQuestionId || "None"}</p>
                   <p>Waiting for new question: {waitingForNewQuestion ? "Yes" : "No"}</p>
                   <p>Player has question: {currentPlayer?.currentQuestion ? "Yes" : "No"}</p>
+                  <p>Player language: {currentPlayer?.language || "None"}</p>
+                  <p>Game state: {gameState}</p>
                   {currentPlayer?.currentQuestion && (
-                    <p>Question English: {currentPlayer.currentQuestion.english}</p>
+                    <>
+                      <p>Question English: {currentPlayer.currentQuestion.english}</p>
+                      <p>Question ID: {currentPlayer.currentQuestion.questionId}</p>
+                      <p>Options count: {currentPlayer.currentQuestion.options?.length || 0}</p>
+                    </>
                   )}
                 </div>
               </CardContent>

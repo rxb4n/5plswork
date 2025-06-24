@@ -29,7 +29,7 @@ async function ensureDbInitialized() {
   }
 }
 
-// Word database
+// Word database - THIS IS THE SOURCE OF ALL QUESTIONS
 const WORD_DATABASE = [
   { english: "Apple", french: "Pomme", german: "Apfel", russian: "яблоко", japanese: "Ringo", spanish: "Manzana" },
   { english: "Car", french: "Voiture", german: "Auto", russian: "машина", japanese: "Kuruma", spanish: "Coche" },
@@ -56,39 +56,88 @@ const WORD_DATABASE = [
   { english: "Green", french: "Vert", german: "Grün", russian: "зелёный", japanese: "Midori", spanish: "Verde" },
   { english: "Yellow", french: "Jaune", german: "Gelb", russian: "жёлтый", japanese: "Kiiro", spanish: "Amarillo" },
   { english: "Black", french: "Noir", german: "Schwarz", russian: "чёрный", japanese: "Kuro", spanish: "Negro" },
+  { english: "White", french: "Blanc", german: "Weiß", russian: "белый", japanese: "Shiro", spanish: "Blanco" },
   { english: "Eat", french: "Manger", german: "Essen", russian: "есть", japanese: "Taberu", spanish: "Comer" },
   { english: "Drink", french: "Boire", german: "Trinken", russian: "пить", japanese: "Nomu", spanish: "Beber" },
   { english: "Run", french: "Courir", german: "Laufen", russian: "бегать", japanese: "Hashiru", spanish: "Correr" },
   { english: "Walk", french: "Marcher", german: "Gehen", russian: "ходить", japanese: "Aruku", spanish: "Caminar" },
   { english: "Sleep", french: "Dormir", german: "Schlafen", russian: "спать", japanese: "Neru", spanish: "Dormir" },
+  { english: "Happy", french: "Heureux", german: "Glücklich", russian: "счастливый", japanese: "Shiawase", spanish: "Feliz" },
+  { english: "Sad", french: "Triste", german: "Traurig", russian: "грустный", japanese: "Kanashii", spanish: "Triste" },
+  { english: "Big", french: "Grand", german: "Groß", russian: "большой", japanese: "Ookii", spanish: "Grande" },
+  { english: "Small", french: "Petit", german: "Klein", russian: "маленький", japanese: "Chiisai", spanish: "Pequeño" },
 ]
 
 // Counter for generating unique question IDs
 let questionCounter = 0
 
 function generateQuestion(language: "french" | "german" | "russian" | "japanese" | "spanish"): Question {
-  const randomWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)]
-  const correctAnswer = randomWord[language]
+  console.log(`=== GENERATING QUESTION FOR ${language.toUpperCase()} ===`)
+  
+  // Validate language
+  if (!["french", "german", "russian", "japanese", "spanish"].includes(language)) {
+    console.error(`Invalid language: ${language}`)
+    throw new Error(`Invalid language: ${language}`)
+  }
 
+  // Select random word
+  const randomWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)]
+  console.log(`Selected word:`, randomWord)
+  
+  // Get correct answer
+  const correctAnswer = randomWord[language]
+  if (!correctAnswer) {
+    console.error(`No translation found for ${language} in word:`, randomWord)
+    throw new Error(`No translation found for ${language}`)
+  }
+
+  // Generate wrong answers
   const wrongAnswers: string[] = []
-  while (wrongAnswers.length < 3) {
+  let attempts = 0
+  const maxAttempts = 50 // Prevent infinite loop
+  
+  while (wrongAnswers.length < 3 && attempts < maxAttempts) {
+    attempts++
     const randomWrongWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)]
     const wrongAnswer = randomWrongWord[language]
-    if (wrongAnswer !== correctAnswer && !wrongAnswers.includes(wrongAnswer)) {
+    
+    if (wrongAnswer && wrongAnswer !== correctAnswer && !wrongAnswers.includes(wrongAnswer)) {
       wrongAnswers.push(wrongAnswer)
     }
   }
 
+  if (wrongAnswers.length < 3) {
+    console.error(`Could not generate enough wrong answers for ${language}. Got ${wrongAnswers.length}/3`)
+    throw new Error(`Could not generate enough wrong answers for ${language}`)
+  }
+
+  // Shuffle options
   const options = [correctAnswer, ...wrongAnswers].sort(() => Math.random() - 0.5)
 
-  const question = {
-    questionId: `q-${questionCounter++}-${Date.now()}`,
+  // Create question object
+  const question: Question = {
+    questionId: `q-${language}-${questionCounter++}-${Date.now()}`,
     english: randomWord.english,
     correctAnswer,
     options,
   }
 
-  console.log(`Generated question ${question.questionId} for ${language}:`, question)
+  console.log(`Generated question:`, {
+    questionId: question.questionId,
+    english: question.english,
+    language: language,
+    correctAnswer: question.correctAnswer,
+    options: question.options,
+    optionsCount: question.options.length
+  })
+
+  // Validate question structure
+  if (!question.questionId || !question.english || !question.correctAnswer || !question.options || question.options.length !== 4) {
+    console.error(`Invalid question structure:`, question)
+    throw new Error(`Invalid question structure`)
+  }
+
+  console.log(`=== QUESTION GENERATION COMPLETE ===`)
   return question
 }
 
@@ -130,6 +179,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       socket.on("create-room", async ({ roomId, playerId, data }, callback) => {
         try {
+          console.log(`Creating room ${roomId} with target score ${data?.targetScore}`)
           const targetScore = [100, 250, 500].includes(Number(data?.targetScore)) ? Number(data.targetScore) : 100
           const room = await createRoom(roomId, { target_score: targetScore })
           if (!room) {
@@ -146,6 +196,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       socket.on("join-room", async ({ roomId, playerId, data }, callback) => {
         try {
+          console.log(`Player ${playerId} joining room ${roomId}`)
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
@@ -175,6 +226,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       socket.on("update-language", async ({ roomId, playerId, data }, callback) => {
         try {
+          console.log(`Updating language for player ${playerId} to ${data.language}`)
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
@@ -202,6 +254,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       socket.on("toggle-ready", async ({ roomId, playerId }, callback) => {
         try {
+          console.log(`Toggling ready for player ${playerId}`)
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
@@ -228,6 +281,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       socket.on("update-target-score", async ({ roomId, playerId, data }, callback) => {
         try {
+          console.log(`Updating target score for room ${roomId} to ${data.targetScore}`)
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
@@ -255,31 +309,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       socket.on("start-game", async ({ roomId, playerId }, callback) => {
         try {
-          console.log(`=== STARTING GAME ===`)
-          console.log(`Room: ${roomId}, Player: ${playerId}`)
+          console.log(`\n=== STARTING GAME ===`)
+          console.log(`Room: ${roomId}, Host Player: ${playerId}`)
           
           const room = await getRoom(roomId)
           if (!room) {
-            console.log(`Room ${roomId} not found`)
+            console.log(`❌ Room ${roomId} not found`)
             return callback({ error: "Room not found", status: 404 })
           }
           
           const player = room.players.find((p) => p.id === playerId)
           if (!player || !player.is_host) {
-            console.log(`Player ${playerId} is not host or not found`)
+            console.log(`❌ Player ${playerId} is not host or not found`)
             return callback({ error: "Only the room creator can start the game", status: 403 })
           }
           
           const playersWithLanguage = room.players.filter((p) => p.language)
-          console.log(`Players with language: ${playersWithLanguage.length}`, playersWithLanguage.map(p => ({ id: p.id, name: p.name, language: p.language })))
+          console.log(`Players with language: ${playersWithLanguage.length}`)
+          playersWithLanguage.forEach(p => {
+            console.log(`  - ${p.name} (${p.id}): ${p.language}, ready: ${p.ready}`)
+          })
           
           if (playersWithLanguage.length === 0) {
+            console.log(`❌ No players have selected a language`)
             return callback({ error: "At least one player must select a language", status: 400 })
           }
           
           if (!playersWithLanguage.every((p) => p.ready)) {
+            console.log(`❌ Not all players with languages are ready`)
             return callback({ error: "All players with languages must be ready", status: 400 })
           }
+
+          console.log(`✅ Pre-flight checks passed, starting game...`)
 
           // Step 1: Update room to playing state
           console.log(`Step 1: Setting room ${roomId} to playing state`)
@@ -287,7 +348,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           console.log(`Room update success: ${roomUpdateSuccess}`)
           
           if (!roomUpdateSuccess) {
-            console.error(`Failed to update room ${roomId} to playing state`)
+            console.error(`❌ Failed to update room ${roomId} to playing state`)
             return callback({ error: "Failed to start game", status: 500 })
           }
           
@@ -297,39 +358,47 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           
           for (const p of playersWithLanguage) {
             if (p.language) {
-              console.log(`Generating question for player ${p.id} (${p.name}) with language ${p.language}`)
-              const question = generateQuestion(p.language)
-              console.log(`Generated question for ${p.id}:`, {
-                questionId: question.questionId,
-                english: question.english,
-                correctAnswer: question.correctAnswer,
-                optionsCount: question.options.length
-              })
-              
-              questionAssignments.push({ playerId: p.id, question })
+              try {
+                console.log(`Generating question for player ${p.id} (${p.name}) with language ${p.language}`)
+                const question = generateQuestion(p.language)
+                console.log(`✅ Generated question for ${p.id}:`, {
+                  questionId: question.questionId,
+                  english: question.english,
+                  correctAnswer: question.correctAnswer,
+                  optionsCount: question.options.length
+                })
+                
+                questionAssignments.push({ playerId: p.id, question })
+              } catch (error) {
+                console.error(`❌ Failed to generate question for player ${p.id}:`, error)
+                return callback({ error: `Failed to generate question for player ${p.name}`, status: 500 })
+              }
             }
           }
           
-          // Assign all questions
+          console.log(`Generated ${questionAssignments.length} questions total`)
+          
+          // Step 3: Assign all questions to players
+          console.log(`Step 3: Assigning questions to players`)
           for (const assignment of questionAssignments) {
             console.log(`Assigning question ${assignment.question.questionId} to player ${assignment.playerId}`)
             const updateSuccess = await updatePlayer(assignment.playerId, { 
               current_question: assignment.question 
             })
-            console.log(`Question assignment for player ${assignment.playerId}: ${updateSuccess ? 'SUCCESS' : 'FAILED'}`)
+            console.log(`Question assignment for player ${assignment.playerId}: ${updateSuccess ? '✅ SUCCESS' : '❌ FAILED'}`)
             
             if (!updateSuccess) {
-              console.error(`Failed to assign question to player ${assignment.playerId}`)
-              return callback({ error: `Failed to assign question to player ${assignment.playerId}`, status: 500 })
+              console.error(`❌ Failed to assign question to player ${assignment.playerId}`)
+              return callback({ error: `Failed to assign question to player`, status: 500 })
             }
           }
 
-          // Step 3: Verify the updates by fetching the room again
-          console.log(`Step 3: Verifying room state after updates`)
+          // Step 4: Verify the updates by fetching the room again
+          console.log(`Step 4: Verifying room state after updates`)
           const updatedRoom = await getRoom(roomId)
           
           if (!updatedRoom) {
-            console.error(`Failed to retrieve updated room ${roomId}`)
+            console.error(`❌ Failed to retrieve updated room ${roomId}`)
             return callback({ error: "Failed to retrieve updated room", status: 500 })
           }
           
@@ -337,33 +406,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             gameState: updatedRoom.game_state,
             playerCount: updatedRoom.players.length,
             playersWithQuestions: updatedRoom.players.filter(p => p.current_question).length,
-            players: updatedRoom.players.map(p => ({
-              id: p.id,
-              name: p.name,
+          })
+          
+          // Log each player's question status
+          updatedRoom.players.forEach(p => {
+            console.log(`Player ${p.name} (${p.id}):`, {
               language: p.language,
               hasQuestion: !!p.current_question,
               questionId: p.current_question?.questionId,
               questionEnglish: p.current_question?.english
-            }))
+            })
           })
           
           // Verify all players with languages have questions
           const playersWithoutQuestions = updatedRoom.players.filter(p => p.language && !p.current_question)
           if (playersWithoutQuestions.length > 0) {
-            console.error(`Players without questions:`, playersWithoutQuestions.map(p => ({ id: p.id, name: p.name, language: p.language })))
+            console.error(`❌ Players without questions:`, playersWithoutQuestions.map(p => ({ id: p.id, name: p.name, language: p.language })))
             return callback({ error: "Failed to assign questions to all players", status: 500 })
           }
           
-          // Step 4: Send response and emit room update
-          console.log(`Step 4: Sending response and emitting room update`)
+          // Step 5: Send response and emit room update
+          console.log(`Step 5: Sending response and emitting room update`)
           callback({ room: updatedRoom })
           
           // Emit to all clients in the room
           io.to(roomId).emit("room-update", { room: updatedRoom })
           
-          console.log(`=== GAME START COMPLETE ===`)
+          console.log(`✅ GAME START COMPLETE - All players should now have questions`)
+          console.log(`=== END GAME START ===\n`)
         } catch (error) {
-          console.error(`Error starting game for room ${roomId}:`, error)
+          console.error(`❌ Error starting game for room ${roomId}:`, error)
           callback({ error: "Failed to start game", status: 500 })
         }
       })
@@ -410,9 +482,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           // Generate next question if game is still ongoing
           if (player.language && room.game_state !== "finished") {
             console.log(`Generating next question for player ${playerId} with language ${player.language}`)
-            const nextQuestion = generateQuestion(player.language)
-            await updatePlayer(playerId, { current_question: nextQuestion })
-            console.log(`Next question assigned to ${playerId}: ${nextQuestion.questionId}`)
+            try {
+              const nextQuestion = generateQuestion(player.language)
+              await updatePlayer(playerId, { current_question: nextQuestion })
+              console.log(`Next question assigned to ${playerId}: ${nextQuestion.questionId}`)
+            } catch (error) {
+              console.error(`Failed to generate next question for player ${playerId}:`, error)
+              return callback({ error: "Failed to generate next question", status: 500 })
+            }
           }
 
           const updatedRoom = await getRoom(roomId)
