@@ -84,13 +84,13 @@ export default function LanguageQuizGame() {
   // Refs for tracking - ISOLATED TIMER IMPLEMENTATION
   const lastProcessedQuestionId = useRef<string | null>(null);
   const currentPlayerId = useRef<string | null>(null);
-  const currentRoomId = useRef<string | null>(null); // Add room ID ref
-  const socketRef = useRef<Socket | null>(null); // Add socket ref
+  const currentRoomId = useRef<string | null>(null);
+  const socketRef = useRef<Socket | null>(null);
   const questionStartTime = useRef<number | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const isProcessingAnswer = useRef<boolean>(false);
-  const currentQuestionRef = useRef<Question | null>(null); // Track current question in ref
-  const ignoreRoomUpdates = useRef<boolean>(false); // Flag to ignore room updates during timer
+  const currentQuestionRef = useRef<Question | null>(null);
+  const ignoreRoomUpdates = useRef<boolean>(false);
 
   // Update refs when values change
   useEffect(() => {
@@ -133,7 +133,7 @@ export default function LanguageQuizGame() {
     // Clear any existing timer
     stopIndividualTimer();
     
-    // Reset states
+    // CRITICAL: Reset all UI states BEFORE starting timer
     setSelectedAnswer(null);
     setShowResult(false);
     isProcessingAnswer.current = false;
@@ -281,7 +281,7 @@ export default function LanguageQuizGame() {
     });
   };
 
-  // FIXED: Centralized answer response handler
+  // FIXED: Centralized answer response handler with proper state management
   const handleAnswerResponse = (response: any) => {
     const normalizedRoom = normalizeRoom(response.room);
     const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayerId.current);
@@ -304,18 +304,23 @@ export default function LanguageQuizGame() {
       return;
     }
 
-    // Handle next question
+    // CRITICAL FIX: Handle next question with proper state reset
     if (updatedPlayer?.currentQuestion) {
       const newQuestion = updatedPlayer.currentQuestion;
       if (newQuestion.questionId !== lastProcessedQuestionId.current) {
         console.log(`🔄 Setting new question after answer: ${newQuestion.questionId}`);
+        
+        // CRITICAL: Reset all UI states BEFORE setting new question
+        setSelectedAnswer(null);
+        setShowResult(false);
+        
         setCurrentQuestion(newQuestion);
         lastProcessedQuestionId.current = newQuestion.questionId;
         
-        // Start new isolated timer for new question
+        // Start new isolated timer for new question with a small delay to ensure UI is reset
         setTimeout(() => {
           startIndividualTimer(newQuestion);
-        }, 100);
+        }, 150); // Slightly longer delay to ensure UI state is properly reset
         
         console.log("✅ New question received after answer:", newQuestion);
       }
@@ -429,6 +434,10 @@ export default function LanguageQuizGame() {
               questionId: newQuestion.questionId,
               english: newQuestion.english,
             });
+            
+            // CRITICAL: Reset UI states before setting question
+            setSelectedAnswer(null);
+            setShowResult(false);
             
             setCurrentQuestion(newQuestion);
             lastProcessedQuestionId.current = newQuestion.questionId;
@@ -629,18 +638,26 @@ export default function LanguageQuizGame() {
     });
   };
 
-  // Leave room
+  // FIXED: Leave room with proper cleanup and immediate UI update
   const leaveRoom = () => {
-    if (currentPlayerId.current && socket) {
+    console.log("🚪 Leaving room...");
+    
+    // IMMEDIATE UI cleanup - don't wait for server response
+    stopIndividualTimer();
+    
+    // Send leave request to server if we have the necessary data
+    if (currentPlayerId.current && socket && roomId) {
+      console.log(`Sending leave-room for player ${currentPlayerId.current} in room ${roomId}`);
       socket.emit("leave-room", { roomId, playerId: currentPlayerId.current });
     }
 
+    // Disconnect socket
     if (socket) {
       socket.disconnect();
       setSocket(null);
     }
 
-    stopIndividualTimer();
+    // IMMEDIATE state reset - don't wait for server
     setGameState("home");
     setPlayers([]);
     setCurrentPlayer(null);
@@ -656,9 +673,13 @@ export default function LanguageQuizGame() {
     currentQuestionRef.current = null;
     setTargetScore(100);
     setIsStartingGame(false);
+    setSelectedAnswer(null);
+    setShowResult(false);
     lastProcessedQuestionId.current = null;
     currentPlayerId.current = null;
     currentRoomId.current = null;
+    
+    console.log("✅ Left room and reset all state");
   };
 
   // Update player language

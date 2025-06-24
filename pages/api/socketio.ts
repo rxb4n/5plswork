@@ -563,22 +563,43 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
+      // FIXED: Leave room handler with proper room update emission
       socket.on("leave-room", async ({ roomId, playerId }) => {
         try {
+          console.log(`\n=== PLAYER LEAVING ROOM ===`)
           console.log(`Player ${playerId} leaving room ${roomId}`)
-          await removePlayerFromRoom(playerId)
-          socket.leave(roomId)
           
+          // Remove player from database
+          const removeSuccess = await removePlayerFromRoom(playerId)
+          console.log(`Player removal from database: ${removeSuccess ? 'SUCCESS' : 'FAILED'}`)
+          
+          // Remove from socket room
+          socket.leave(roomId)
+          console.log(`Player removed from socket room ${roomId}`)
+          
+          // Get updated room state
           const room = await getRoom(roomId)
+          
           if (!room || room.players.length === 0) {
-            console.log(`Room ${roomId} is now empty, notifying remaining clients`)
+            console.log(`Room ${roomId} is now empty or doesn't exist`)
+            // Notify any remaining clients that room is closed
             io.to(roomId).emit("error", { message: "Room closed", status: 404 })
+            console.log(`=== ROOM CLOSED ===\n`)
             return
           }
           
+          console.log(`Room ${roomId} still has ${room.players.length} players:`)
+          room.players.forEach(p => {
+            console.log(`  - ${p.name} (${p.id}) - Host: ${p.is_host}`)
+          })
+          
+          // CRITICAL: Emit room update to ALL remaining clients
+          console.log(`Emitting room-update to remaining players in room ${roomId}`)
           io.to(roomId).emit("room-update", { room })
+          
+          console.log(`=== PLAYER LEAVE COMPLETE ===\n`)
         } catch (error) {
-          console.error(`Error leaving room ${roomId} for player ${playerId}:`, error)
+          console.error(`❌ Error handling leave-room for player ${playerId} in room ${roomId}:`, error)
           io.to(roomId).emit("error", { message: "Failed to leave room", status: 500 })
         }
       })
