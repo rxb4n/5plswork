@@ -82,26 +82,51 @@ export default function LanguageQuizGame() {
   // Memoize currentQuestion to prevent unnecessary re-renders
   const memoizedCurrentQuestion = useMemo(() => currentQuestion, [currentQuestion?.questionId]);
 
-  // Normalize server room to client expected format
+  // FIXED: Normalize server room to client expected format
   const normalizeRoom = (serverRoom: ServerRoom): {
     id: string;
     gameState: string;
     players: Player[];
     targetScore: number;
-  } => ({
-    id: serverRoom.id,
-    gameState: serverRoom.game_state,
-    players: serverRoom.players.map((p) => ({
+  } => {
+    console.log("🔧 Normalizing server room data:", {
+      gameState: serverRoom.game_state,
+      playerCount: serverRoom.players.length,
+      playersWithQuestions: serverRoom.players.filter(p => p.current_question).length
+    });
+
+    const normalizedPlayers = serverRoom.players.map((p) => {
+      console.log(`🔧 Normalizing player ${p.name} (${p.id}):`, {
+        hasCurrentQuestion: !!p.current_question,
+        questionId: p.current_question?.questionId,
+        questionEnglish: p.current_question?.english
+      });
+
+      return {
+        id: p.id,
+        name: p.name,
+        language: p.language,
+        ready: p.ready,
+        score: p.score,
+        isHost: p.is_host,
+        currentQuestion: p.current_question || undefined, // CRITICAL: Map current_question to currentQuestion
+      };
+    });
+
+    console.log("🔧 Normalized players:", normalizedPlayers.map(p => ({
       id: p.id,
       name: p.name,
-      language: p.language,
-      ready: p.ready,
-      score: p.score,
-      isHost: p.is_host,
-      currentQuestion: p.current_question || undefined,
-    })),
-    targetScore: serverRoom.target_score || 100,
-  });
+      hasCurrentQuestion: !!p.currentQuestion,
+      questionId: p.currentQuestion?.questionId
+    })));
+
+    return {
+      id: serverRoom.id,
+      gameState: serverRoom.game_state,
+      players: normalizedPlayers,
+      targetScore: serverRoom.target_score || 100,
+    };
+  };
 
   // Initialize Socket.IO connection
   useEffect(() => {
