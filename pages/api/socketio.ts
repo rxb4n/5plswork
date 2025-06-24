@@ -440,9 +440,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
+      // MODIFIED: Answer handler with individual timing and penalties
       socket.on("answer", async ({ roomId, playerId, data }, callback) => {
         try {
-          console.log(`Processing answer from player ${playerId} in room ${roomId}`)
+          console.log(`\n=== PROCESSING ANSWER ===`)
+          console.log(`Player: ${playerId}, Room: ${roomId}`)
+          console.log(`Answer data:`, data)
           
           const room = await getRoom(roomId)
           if (!room) {
@@ -451,32 +454,56 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           
           const player = room.players.find((p) => p.id === playerId)
           if (!player || !player.current_question) {
-            console.log(`Player ${playerId} or question not found. Player exists: ${!!player}, Has question: ${!!player?.current_question}`)
+            console.log(`❌ Player ${playerId} or question not found. Player exists: ${!!player}, Has question: ${!!player?.current_question}`)
             return callback({ error: "Player or question not found", status: 404 })
           }
 
-          const { answer, timeLeft } = data
-          const isCorrect = answer === player.current_question.correctAnswer
+          const { answer, timeLeft, questionId } = data
+          const currentQuestion = player.current_question
           
-          console.log(`Answer from ${playerId}: "${answer}", Correct: "${player.current_question.correctAnswer}", Is correct: ${isCorrect}`)
+          // Verify question ID matches (prevent stale answers)
+          if (questionId && questionId !== currentQuestion.questionId) {
+            console.log(`❌ Question ID mismatch. Expected: ${currentQuestion.questionId}, Got: ${questionId}`)
+            return callback({ error: "Question has changed", status: 400 })
+          }
+          
+          const isCorrect = answer === currentQuestion.correctAnswer
+          const isTimeout = timeLeft <= 0 || answer === ""
+          
+          console.log(`Answer evaluation:`)
+          console.log(`  - Answer: "${answer}"`)
+          console.log(`  - Correct: "${currentQuestion.correctAnswer}"`)
+          console.log(`  - Is correct: ${isCorrect}`)
+          console.log(`  - Is timeout/empty: ${isTimeout}`)
+          console.log(`  - Time left: ${timeLeft}s`)
           
           let newScore = player.score
+          let pointsChange = 0
+          
           if (isCorrect) {
-            const points = Math.max(1, Math.round(10 - (10 - timeLeft)))
-            newScore = player.score + points
-            console.log(`Player ${playerId} scored ${points} points, new total: ${newScore}`)
-            
-            await updatePlayer(playerId, { score: newScore })
-            
-            // Check if player won
-            if (newScore >= room.target_score) {
-              console.log(`Player ${playerId} reached target score ${room.target_score}, ending game`)
-              await updateRoom(roomId, { game_state: "finished", winner_id: playerId })
-              const finalRoom = await getRoom(roomId)
-              callback({ room: finalRoom })
-              io.to(roomId).emit("room-update", { room: finalRoom })
-              return
-            }
+            // Correct answer: award points based on speed
+            pointsChange = Math.max(1, Math.round(10 - (10 - timeLeft)))
+            newScore = player.score + pointsChange
+            console.log(`✅ Correct answer! Player ${playerId} earned ${pointsChange} points, new total: ${newScore}`)
+          } else {
+            // Wrong answer or timeout: apply -5 penalty
+            pointsChange = -5
+            newScore = Math.max(0, player.score + pointsChange) // Don't go below 0
+            console.log(`❌ Wrong answer/timeout! Player ${playerId} loses 5 points, new total: ${newScore}`)
+          }
+          
+          // Update player score
+          await updatePlayer(playerId, { score: newScore })
+          
+          // Check if player won (only if they have positive score)
+          if (newScore >= room.target_score && newScore > 0) {
+            console.log(`🏆 Player ${playerId} reached target score ${room.target_score}, ending game`)
+            await updateRoom(roomId, { game_state: "finished", winner_id: playerId })
+            const finalRoom = await getRoom(roomId)
+            callback({ room: finalRoom })
+            io.to(roomId).emit("room-update", { room: finalRoom })
+            console.log(`=== GAME FINISHED ===\n`)
+            return
           }
           
           // Generate next question if game is still ongoing
@@ -485,9 +512,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             try {
               const nextQuestion = generateQuestion(player.language)
               await updatePlayer(playerId, { current_question: nextQuestion })
-              console.log(`Next question assigned to ${playerId}: ${nextQuestion.questionId}`)
+              console.log(`✅ Next question assigned to ${playerId}: ${nextQuestion.questionId}`)
             } catch (error) {
-              console.error(`Failed to generate next question for player ${playerId}:`, error)
+              console.error(`❌ Failed to generate next question for player ${playerId}:`, error)
               return callback({ error: "Failed to generate next question", status: 500 })
             }
           }
@@ -495,8 +522,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
+          
+          console.log(`=== ANSWER PROCESSED ===\n`)
         } catch (error) {
-          console.error(`Error processing answer for player ${playerId}:`, error)
+          console.error(`❌ Error processing answer for player ${playerId}:`, error)
           callback({ error: "Failed to process answer", status: 500 })
         }
       })

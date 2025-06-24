@@ -29,6 +29,7 @@ interface Question {
   english: string;
   correctAnswer: string;
   options: string[];
+  startTime?: number; // ADDED: Track when question started for individual timing
 }
 
 interface ServerInfo {
@@ -73,7 +74,7 @@ export default function LanguageQuizGame() {
   const [winner, setWinner] = useState<Player | null>(null);
   const [creatorId, setCreatorId] = useState<string | null>(null);
 
-  // Question and game flow state - SIMPLIFIED
+  // Question and game flow state - INDIVIDUAL TIMER IMPLEMENTATION
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
   const [timeLeft, setTimeLeft] = useState(10);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
@@ -83,7 +84,9 @@ export default function LanguageQuizGame() {
 
   // Refs for tracking
   const lastProcessedQuestionId = useRef<string | null>(null);
-  const currentPlayerId = useRef<string | null>(null); // CRITICAL FIX: Track player ID separately
+  const currentPlayerId = useRef<string | null>(null);
+  const questionStartTime = useRef<number | null>(null); // ADDED: Track individual question start time
+  const timerRef = useRef<NodeJS.Timeout | null>(null); // ADDED: Track timer reference
 
   // FIXED: Normalize server room to client expected format
   const normalizeRoom = (serverRoom: ServerRoom): {
@@ -108,7 +111,7 @@ export default function LanguageQuizGame() {
         ready: p.ready,
         score: p.score,
         isHost: p.is_host,
-        currentQuestion: p.current_question || undefined, // CRITICAL: Map current_question to currentQuestion
+        currentQuestion: p.current_question || undefined,
       };
     });
 
@@ -125,6 +128,52 @@ export default function LanguageQuizGame() {
       players: normalizedPlayers,
       targetScore: serverRoom.target_score || 100,
     };
+  };
+
+  // ADDED: Start individual timer for current player's question
+  const startIndividualTimer = (question: Question) => {
+    console.log(`⏰ Starting individual timer for question ${question.questionId}`);
+    
+    // Clear any existing timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+    
+    // Set question start time
+    questionStartTime.current = Date.now();
+    setTimeLeft(10);
+    
+    // Start countdown timer
+    timerRef.current = setInterval(() => {
+      if (!questionStartTime.current) return;
+      
+      const elapsed = Math.floor((Date.now() - questionStartTime.current) / 1000);
+      const remaining = Math.max(0, 10 - elapsed);
+      
+      setTimeLeft(remaining);
+      
+      if (remaining <= 0) {
+        console.log("⏰ Individual timer expired!");
+        clearInterval(timerRef.current!);
+        timerRef.current = null;
+        
+        // Auto-submit empty answer (triggers penalty)
+        if (!selectedAnswer) {
+          setShowResult(true);
+          selectAnswer(""); // Empty answer = wrong answer = penalty
+        }
+      }
+    }, 100); // Update more frequently for smoother countdown
+  };
+
+  // ADDED: Stop individual timer
+  const stopIndividualTimer = () => {
+    if (timerRef.current) {
+      console.log("⏰ Stopping individual timer");
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    questionStartTime.current = null;
   };
 
   // Initialize Socket.IO connection
@@ -234,10 +283,10 @@ export default function LanguageQuizGame() {
         setGameState("playing");
         setIsStartingGame(false);
         
-        // CRITICAL FIX: Immediately set the question from the updated player data
+        // INDIVIDUAL TIMER: Set question and start individual timer
         if (updatedCurrentPlayer?.currentQuestion) {
           const newQuestion = updatedCurrentPlayer.currentQuestion;
-          console.log(`🎯 SETTING QUESTION IMMEDIATELY:`, {
+          console.log(`🎯 SETTING QUESTION WITH INDIVIDUAL TIMER:`, {
             questionId: newQuestion.questionId,
             english: newQuestion.english,
             correctAnswer: newQuestion.correctAnswer,
@@ -246,22 +295,26 @@ export default function LanguageQuizGame() {
           
           // Set all question-related state immediately
           setCurrentQuestion(newQuestion);
-          setTimeLeft(10);
           setSelectedAnswer(null);
           setShowResult(false);
           lastProcessedQuestionId.current = newQuestion.questionId;
           
-          console.log("✅ Question set successfully!");
+          // Start individual timer for this player
+          startIndividualTimer(newQuestion);
+          
+          console.log("✅ Question set with individual timer!");
         } else {
           console.log("❌ No question found for current player");
           console.log("Current player data:", updatedCurrentPlayer);
           setCurrentQuestion(null);
+          stopIndividualTimer();
         }
       } else if (room.gameState === "finished" && data.room.winner_id) {
         const winnerPlayer = room.players.find((p) => p.id === data.room.winner_id);
         setWinner(winnerPlayer || null);
         setGameState("finished");
         setCurrentQuestion(null);
+        stopIndividualTimer();
         lastProcessedQuestionId.current = null;
       } else if (room.gameState === "lobby" && gameState !== "lobby") {
         console.log("Game state is lobby, transitioning to lobby view");
@@ -269,6 +322,7 @@ export default function LanguageQuizGame() {
         setCurrentQuestion(null);
         setWinner(null);
         setIsStartingGame(false);
+        stopIndividualTimer();
         lastProcessedQuestionId.current = null;
       }
 
@@ -278,18 +332,20 @@ export default function LanguageQuizGame() {
         
         // Only update if it's a different question
         if (newQuestion.questionId !== lastProcessedQuestionId.current) {
-          console.log(`🔄 NEW QUESTION DURING GAMEPLAY:`, {
+          console.log(`🔄 NEW QUESTION DURING GAMEPLAY WITH INDIVIDUAL TIMER:`, {
             questionId: newQuestion.questionId,
             english: newQuestion.english
           });
           
           setCurrentQuestion(newQuestion);
-          setTimeLeft(10);
           setSelectedAnswer(null);
           setShowResult(false);
           lastProcessedQuestionId.current = newQuestion.questionId;
           
-          console.log("✅ New question set during gameplay!");
+          // Start new individual timer for this question
+          startIndividualTimer(newQuestion);
+          
+          console.log("✅ New question set with individual timer!");
         }
       }
 
@@ -316,31 +372,18 @@ export default function LanguageQuizGame() {
 
     return () => {
       console.log("Cleaning up Socket.IO connection");
+      stopIndividualTimer(); // Clean up timer
       newSocket.disconnect();
       setSocket(null);
     };
   }, []);
 
-  // Timer effect - SIMPLIFIED
+  // Cleanup timer on unmount
   useEffect(() => {
-    if (gameState === "playing" && timeLeft > 0 && !selectedAnswer && currentQuestion) {
-      console.log(`⏰ Timer: ${timeLeft}s for question ${currentQuestion.questionId}`);
-      
-      const timer = setInterval(() => {
-        setTimeLeft((prev) => {
-          const newTime = prev - 1;
-          if (newTime <= 0) {
-            console.log("⏰ Time's up!");
-            setShowResult(true);
-            selectAnswer(""); // Auto-submit empty answer
-          }
-          return newTime;
-        });
-      }, 1000);
-
-      return () => clearInterval(timer);
-    }
-  }, [gameState, timeLeft, selectedAnswer, currentQuestion]);
+    return () => {
+      stopIndividualTimer();
+    };
+  }, []);
 
   // Generate random room ID
   const generateRoomId = () => {
@@ -358,7 +401,7 @@ export default function LanguageQuizGame() {
 
     const newRoomId = generateRoomId();
     const playerId = `player-${Date.now()}`;
-    currentPlayerId.current = playerId; // CRITICAL FIX: Store player ID
+    currentPlayerId.current = playerId;
     
     const player: Player = {
       id: playerId,
@@ -406,7 +449,7 @@ export default function LanguageQuizGame() {
     if (!playerName.trim() || !roomId.trim() || !socket) return;
 
     const playerId = `player-${Date.now()}`;
-    currentPlayerId.current = playerId; // CRITICAL FIX: Store player ID
+    currentPlayerId.current = playerId;
     
     const targetRoomId = roomId.trim();
     const player: Player = {
@@ -481,6 +524,7 @@ export default function LanguageQuizGame() {
       setSocket(null);
     }
 
+    stopIndividualTimer(); // Clean up timer
     setGameState("home");
     setPlayers([]);
     setCurrentPlayer(null);
@@ -496,7 +540,7 @@ export default function LanguageQuizGame() {
     setTargetScore(100);
     setIsStartingGame(false);
     lastProcessedQuestionId.current = null;
-    currentPlayerId.current = null; // CRITICAL FIX: Clear player ID
+    currentPlayerId.current = null;
   };
 
   // Update player language
@@ -579,15 +623,31 @@ export default function LanguageQuizGame() {
     });
   };
 
-  // Handle answer selection
+  // MODIFIED: Handle answer selection with individual timing and penalties
   const selectAnswer = (answer: string) => {
     if (selectedAnswer || !currentQuestion || !currentPlayer || !socket) return;
 
+    // Calculate actual time taken using individual timer
+    const actualTimeLeft = questionStartTime.current 
+      ? Math.max(0, 10 - Math.floor((Date.now() - questionStartTime.current) / 1000))
+      : timeLeft;
+
     console.log(`🎯 Submitting answer for question ${currentQuestion.questionId}: "${answer}"`);
+    console.log(`⏰ Actual time left: ${actualTimeLeft}s`);
+    
     setSelectedAnswer(answer);
     setShowResult(true);
+    stopIndividualTimer(); // Stop the individual timer
 
-    socket.emit("answer", { roomId, playerId: currentPlayer.id, data: { answer, timeLeft } }, (response: any) => {
+    socket.emit("answer", { 
+      roomId, 
+      playerId: currentPlayer.id, 
+      data: { 
+        answer, 
+        timeLeft: actualTimeLeft,
+        questionId: currentQuestion.questionId // Send question ID for verification
+      } 
+    }, (response: any) => {
       console.log("Answer response:", response);
       if (response?.room) {
         const normalizedRoom = normalizeRoom(response.room);
@@ -610,11 +670,14 @@ export default function LanguageQuizGame() {
           if (newQuestion.questionId !== lastProcessedQuestionId.current) {
             console.log(`🔄 Setting new question after answer: ${newQuestion.questionId}`);
             setCurrentQuestion(newQuestion);
-            setTimeLeft(10);
             setSelectedAnswer(null);
             setShowResult(false);
             lastProcessedQuestionId.current = newQuestion.questionId;
-            console.log("✅ New question received:", newQuestion);
+            
+            // Start individual timer for new question
+            startIndividualTimer(newQuestion);
+            
+            console.log("✅ New question received with individual timer:", newQuestion);
           }
         }
       }
@@ -625,6 +688,7 @@ export default function LanguageQuizGame() {
   const restartGame = () => {
     if (!currentPlayer || !currentPlayer.isHost || !socket) return;
     console.log("Restarting game");
+    stopIndividualTimer(); // Clean up timer
     socket.emit("restart", { roomId, playerId: currentPlayer.id }, () => {
       lastProcessedQuestionId.current = null;
       setTargetScore(100);
@@ -911,7 +975,9 @@ export default function LanguageQuizGame() {
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center gap-2 mb-2">
                     <Clock className="w-5 h-5" />
-                    <span className="text-xl font-bold">{timeLeft}s</span>
+                    <span className={`text-xl font-bold ${timeLeft <= 3 ? 'text-red-500' : ''}`}>
+                      {timeLeft}s
+                    </span>
                   </div>
                   <div className="space-y-1">
                     {players.map((player) => (
@@ -934,7 +1000,13 @@ export default function LanguageQuizGame() {
               <Card>
                 <CardHeader className="text-center">
                   <CardTitle className="text-3xl font-bold text-blue-700">{currentQuestion.english}</CardTitle>
-                  <CardDescription>Select the correct translation in {currentPlayer?.language}</CardDescription>
+                  <CardDescription>
+                    Select the correct translation in {currentPlayer?.language}
+                    <br />
+                    <span className="text-xs text-gray-500">
+                      Individual timer • Wrong answer = -5 points
+                    </span>
+                  </CardDescription>
                 </CardHeader>
               </Card>
 
@@ -974,14 +1046,16 @@ export default function LanguageQuizGame() {
                         <p className="text-xl font-bold">Correct! 🎉</p>
                         <p>You earned {Math.max(1, 10 - (10 - timeLeft))} points!</p>
                       </div>
-                    ) : timeLeft === 0 ? (
+                    ) : timeLeft === 0 || selectedAnswer === "" ? (
                       <div className="text-orange-600">
                         <p className="text-xl font-bold">Time's up! ⏰</p>
+                        <p className="text-red-600 font-semibold">-5 points penalty</p>
                         <p>The correct answer was: {currentQuestion.correctAnswer}</p>
                       </div>
                     ) : (
                       <div className="text-red-600">
-                        <p className="text-xl font-bold">Wrong answer!</p>
+                        <p className="text-xl font-bold">Wrong answer! ❌</p>
+                        <p className="text-red-600 font-semibold">-5 points penalty</p>
                         <p>The correct answer was: {currentQuestion.correctAnswer}</p>
                       </div>
                     )}
