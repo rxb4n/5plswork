@@ -51,6 +51,7 @@ interface ServerRoom {
   creator_id: string;
   winner_id: string | null;
   question_count: number | null;
+  target_score: number; // New field for target score
 }
 
 export default function LanguageQuizGame() {
@@ -75,7 +76,8 @@ export default function LanguageQuizGame() {
   const [creatorId, setCreatorId] = useState<string | null>(null);
   const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(null);
   const [waitingForNewQuestion, setWaitingForNewQuestion] = useState(true);
-  const lastProcessedQuestionId = useRef<string | null>(null); // Track last processed questionId
+  const [targetScore, setTargetScore] = useState(100); // New state for target score
+  const lastProcessedQuestionId = useRef<string | null>(null);
 
   // Memoize currentQuestion to prevent unnecessary re-renders
   const memoizedCurrentQuestion = useMemo(() => currentQuestion, [currentQuestion?.questionId]);
@@ -86,6 +88,7 @@ export default function LanguageQuizGame() {
     gameState: string;
     players: Player[];
     creatorId: string;
+    targetScore: number; // Include target score
   } => ({
     id: serverRoom.id,
     gameState: serverRoom.game_state,
@@ -99,6 +102,7 @@ export default function LanguageQuizGame() {
       currentQuestion: p.current_question || undefined,
     })),
     creatorId: serverRoom.creator_id,
+    targetScore: serverRoom.target_score || 100, // Default to 100 if not set
   });
 
   // API call helper
@@ -239,6 +243,7 @@ export default function LanguageQuizGame() {
           players: room.players,
           currentPlayerQuestion: room.players.find((p: Player) => p.id === currentPlayer?.id)?.currentQuestion?.questionId,
           waitingForNewQuestion,
+          targetScore: room.targetScore,
         });
 
         // Enforce creator as host
@@ -251,6 +256,7 @@ export default function LanguageQuizGame() {
         setConnectionError(null);
         setConsecutiveErrors(0);
         setShowRecoveryOption(false);
+        setTargetScore(room.targetScore); // Update target score
 
         if (data.serverInfo) {
           setServerInfo(data.serverInfo);
@@ -340,6 +346,7 @@ export default function LanguageQuizGame() {
     if (result?.room) {
       const normalizedRoom = normalizeRoom(result.room);
       setPlayers(normalizedRoom.players);
+      setTargetScore(normalizedRoom.targetScore); // Update target score on recovery
       setConnectionError("Room recovered successfully!");
       setShowRecoveryOption(false);
       setTimeout(() => setConnectionError(null), 3000);
@@ -450,6 +457,7 @@ export default function LanguageQuizGame() {
         const normalizedRoom = normalizeRoom(joinResult.room);
         setRoomId(newRoomId);
         setCreatorId(playerId);
+        setTargetScore(normalizedRoom.targetScore); // Set initial target score
         const serverPlayer = normalizedRoom.players.find((p: Player) => p.id === playerId);
         console.log("Server player data:", serverPlayer);
         setCurrentPlayer({
@@ -511,6 +519,7 @@ export default function LanguageQuizGame() {
         setGameState("lobby");
         setIsConnected(true);
         setPlayers(normalizedRoom.players);
+        setTargetScore(normalizedRoom.targetScore); // Set target score on join
         setConnectionError(null);
         setConsecutiveErrors(0);
 
@@ -553,6 +562,7 @@ export default function LanguageQuizGame() {
     setCurrentQuestion(null);
     setCurrentQuestionId(null);
     setWaitingForNewQuestion(true);
+    setTargetScore(100); // Reset target score
     lastProcessedQuestionId.current = null;
   };
 
@@ -567,6 +577,7 @@ export default function LanguageQuizGame() {
     if (result?.room) {
       const normalizedRoom = normalizeRoom(result.room);
       setPlayers(normalizedRoom.players);
+      setTargetScore(normalizedRoom.targetScore); // Update target score
       const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayer.id);
       if (updatedPlayer) {
         setCurrentPlayer({
@@ -589,6 +600,7 @@ export default function LanguageQuizGame() {
     if (result?.room) {
       const normalizedRoom = normalizeRoom(result.room);
       setPlayers(normalizedRoom.players);
+      setTargetScore(normalizedRoom.targetScore); // Update target score
       const updatedPlayer = normalizedRoom.players.find((p) => p.id === currentPlayer.id);
       if (updatedPlayer) {
         setCurrentPlayer({
@@ -597,6 +609,21 @@ export default function LanguageQuizGame() {
         });
         console.log(`Ready toggled for player ${currentPlayer.id}, isHost preserved: ${isCreator}`);
       }
+    }
+  };
+
+  // Update target score (new function)
+  const updateTargetScore = async (score: number) => {
+    if (!currentPlayer || currentPlayer.id !== creatorId) return;
+
+    console.log(`Updating target score for room ${roomId} to ${score}`);
+    const result = await apiCall("update-target-score", { targetScore: score }, currentPlayer.id);
+
+    if (result?.room) {
+      const normalizedRoom = normalizeRoom(result.room);
+      setPlayers(normalizedRoom.players);
+      setTargetScore(normalizedRoom.targetScore);
+      console.log(`Target score updated to ${normalizedRoom.targetScore}`);
     }
   };
 
@@ -643,6 +670,7 @@ export default function LanguageQuizGame() {
       const normalizedRoom = normalizeRoom(result.room);
       const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayer.id);
       setPlayers(normalizedRoom.players);
+      setTargetScore(normalizedRoom.targetScore); // Update target score
 
       if (updatedPlayer) {
         setCurrentPlayer({
@@ -688,6 +716,7 @@ export default function LanguageQuizGame() {
     await apiCall("restart", {}, currentPlayer.id);
     setWaitingForNewQuestion(true);
     lastProcessedQuestionId.current = null;
+    setTargetScore(100); // Reset target score on restart
   };
 
   // Connection status indicator
@@ -781,6 +810,7 @@ export default function LanguageQuizGame() {
       playersWithLanguages,
       allPlayersWithLanguagesReady,
       players,
+      targetScore,
     });
 
     return (
@@ -875,6 +905,25 @@ export default function LanguageQuizGame() {
                 </Select>
               </div>
 
+              {currentPlayer?.id === creatorId && (
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Target Score</label>
+                  <Select
+                    value={targetScore.toString()}
+                    onValueChange={(value) => updateTargetScore(Number(value))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select target score" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="100">100</SelectItem>
+                      <SelectItem value="250">250</SelectItem>
+                      <SelectItem value="500">500</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               <Button
                 onClick={toggleReady}
                 className="w-full"
@@ -942,7 +991,7 @@ export default function LanguageQuizGame() {
                 <div className="flex items-center gap-4">
                   <Badge className="text-lg px-3 py-1">Your Score: {currentPlayer?.score || 0}</Badge>
                   <Badge variant="outline" className="text-lg px-3 py-1">
-                    Target: 100
+                    Target: {targetScore}
                   </Badge>
                 </div>
 
@@ -1049,7 +1098,7 @@ export default function LanguageQuizGame() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="bg-yellow-50 p-4 rounded-lg">
-              <p className="font-medium">Final Scores:</p>
+              <p className="font-medium">Final Scores (Target: {targetScore}):</p>
               {players.map((player) => (
                 <div key={player.id} className="flex justify-between items-center mt-2">
                   <span>{player.name}</span>
