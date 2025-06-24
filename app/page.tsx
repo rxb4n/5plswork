@@ -96,10 +96,10 @@ export default function LanguageQuizGame() {
     });
 
     const normalizedPlayers = serverRoom.players.map((p) => {
-      console.log(`🔧 Normalizing player ${p.name} (${p.id}):`, {
-        hasCurrentQuestion: !!p.current_question,
-        questionId: p.current_question?.questionId,
-        questionEnglish: p.current_question?.english
+      console.log(`🔧 Raw server player data for ${p.name} (${p.id}):`, {
+        current_question: p.current_question,
+        current_question_type: typeof p.current_question,
+        current_question_keys: p.current_question ? Object.keys(p.current_question) : null
       });
 
       return {
@@ -117,7 +117,8 @@ export default function LanguageQuizGame() {
       id: p.id,
       name: p.name,
       hasCurrentQuestion: !!p.currentQuestion,
-      questionId: p.currentQuestion?.questionId
+      questionId: p.currentQuestion?.questionId,
+      questionEnglish: p.currentQuestion?.english
     })));
 
     return {
@@ -209,7 +210,8 @@ export default function LanguageQuizGame() {
           id: updatedCurrentPlayer.id,
           name: updatedCurrentPlayer.name,
           hasQuestion: !!updatedCurrentPlayer.currentQuestion,
-          questionId: updatedCurrentPlayer.currentQuestion?.questionId
+          questionId: updatedCurrentPlayer.currentQuestion?.questionId,
+          questionEnglish: updatedCurrentPlayer.currentQuestion?.english
         });
         
         // CRITICAL: Update current player state immediately
@@ -230,8 +232,16 @@ export default function LanguageQuizGame() {
         setGameState("playing");
         setIsStartingGame(false);
         
-        // CRITICAL FIX: Use the updated current player data
+        // CRITICAL FIX: Use the updated current player data directly
         const playerWithQuestion = updatedCurrentPlayer || currentPlayer;
+        
+        console.log("🔍 Checking for question on player:", {
+          playerId: playerWithQuestion?.id,
+          playerName: playerWithQuestion?.name,
+          hasCurrentQuestion: !!playerWithQuestion?.currentQuestion,
+          questionId: playerWithQuestion?.currentQuestion?.questionId,
+          questionEnglish: playerWithQuestion?.currentQuestion?.english
+        });
         
         if (playerWithQuestion?.currentQuestion) {
           const newQuestion = playerWithQuestion.currentQuestion;
@@ -242,7 +252,8 @@ export default function LanguageQuizGame() {
             questionId: newQuestionId,
             english: newQuestion.english,
             correctAnswer: newQuestion.correctAnswer,
-            optionsCount: newQuestion.options.length
+            optionsCount: newQuestion.options.length,
+            options: newQuestion.options
           });
           
           // CRITICAL: Always set the question when we have one
@@ -261,7 +272,9 @@ export default function LanguageQuizGame() {
             currentPlayerId: currentPlayer?.id,
             updatedPlayerId: updatedCurrentPlayer?.id,
             currentPlayerHasQuestion: !!currentPlayer?.currentQuestion,
-            updatedPlayerHasQuestion: !!updatedCurrentPlayer?.currentQuestion
+            updatedPlayerHasQuestion: !!updatedCurrentPlayer?.currentQuestion,
+            allPlayersWithQuestions: room.players.filter(p => p.currentQuestion).length,
+            totalPlayers: room.players.length
           });
           setWaitingForNewQuestion(true);
           setCurrentQuestion(null);
