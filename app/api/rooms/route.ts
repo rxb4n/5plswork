@@ -165,12 +165,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       path: "/api/socket",
       addTrailingSlash: false,
       cors: {
-        origin: ["https://oneplswork.onrender.com", "http://localhost:3000"],
+        origin: ["https://your-actual-render-client-url.onrender.com", "http://localhost:3000"], // <-- Verify and update this
         methods: ["GET", "POST"],
         credentials: true,
       },
-      transports: ["websocket", "polling"], // Ensure WebSocket is prioritized
-      pingTimeout: 20000, // Increase timeout to handle cold starts
+      transports: ["websocket", "polling"],
+      pingTimeout: 20000,
       pingInterval: 25000,
     });
 
