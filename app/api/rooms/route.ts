@@ -29,7 +29,7 @@ async function ensureDbInitialized() {
   }
 }
 
-// Word database
+// Word database (unchanged)
 const WORD_DATABASE = [
   { english: "Apple", french: "Pomme", german: "Apfel", russian: "яблоко", japanese: "Ringo", spanish: "Manzana" },
   { english: "Car", french: "Voiture", german: "Auto", russian: "машина", japanese: "Kuruma", spanish: "Coche" },
@@ -164,6 +164,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const io = new SocketIOServer(res.socket.server, {
       path: "/api/socket",
       addTrailingSlash: false,
+      cors: {
+        origin: ["https://oneplswork.onrender.com", "http://localhost:3000"],
+        methods: ["GET", "POST"],
+        credentials: true,
+      },
+      transports: ["websocket", "polling"], // Ensure WebSocket is prioritized
+      pingTimeout: 20000, // Increase timeout to handle cold starts
+      pingInterval: 25000,
     });
 
     // Schedule periodic room cleanup (every 10 minutes)
@@ -498,6 +506,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
 
     res.socket.server.io = io;
+  } else {
+    console.log("Socket.IO server already initialized");
   }
 
   res.status(200).end();
