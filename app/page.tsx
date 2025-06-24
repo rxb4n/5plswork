@@ -990,7 +990,7 @@ export default function LanguageQuizGame() {
   // Game Screen
   if (gameState === "playing") {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-100 p-4">
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-100 p-4 pb-20">
         <div className="max-w-2xl mx-auto space-y-6">
           {connectionError && (
             <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm">
@@ -1130,6 +1130,17 @@ export default function LanguageQuizGame() {
               )}
             </>
           )}
+
+          {/* Leave Game Button - Fixed at bottom */}
+          <div className="fixed bottom-4 left-4 right-4 max-w-2xl mx-auto">
+            <Button 
+              onClick={leaveRoom} 
+              variant="destructive" 
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 text-lg shadow-lg"
+            >
+              Leave Game
+            </Button>
+          </div>
         </div>
       </div>
     );
