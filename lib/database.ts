@@ -123,18 +123,51 @@ export async function getRoom(roomId: string): Promise<Room | null> {
     const playersResult = await client.query("SELECT * FROM players WHERE room_id = $1 ORDER BY created_at", [roomId]);
 
     const room = roomResult.rows[0];
-    return {
-      id: room.id,
-      players: playersResult.rows.map((p) => ({
+    const players = playersResult.rows.map((p) => {
+      let currentQuestion = null;
+      
+      // Safely parse the current_question JSON
+      if (p.current_question) {
+        try {
+          if (typeof p.current_question === 'string') {
+            currentQuestion = JSON.parse(p.current_question);
+          } else {
+            currentQuestion = p.current_question;
+          }
+          
+          // Validate the question structure
+          if (currentQuestion && (!currentQuestion.questionId || !currentQuestion.english || !currentQuestion.correctAnswer || !currentQuestion.options)) {
+            console.warn(`Invalid question structure for player ${p.id}:`, currentQuestion);
+            currentQuestion = null;
+          }
+        } catch (error) {
+          console.error(`Error parsing current_question for player ${p.id}:`, error);
+          currentQuestion = null;
+        }
+      }
+
+      return {
         id: p.id,
         name: p.name,
         language: p.language,
         ready: p.ready,
         score: p.score,
         is_host: p.is_host,
-        current_question: p.current_question || null,
+        current_question: currentQuestion,
         last_seen: p.last_seen,
-      })),
+      };
+    });
+
+    console.log(`Retrieved room ${roomId} with ${players.length} players:`, players.map(p => ({
+      id: p.id,
+      name: p.name,
+      hasQuestion: !!p.current_question,
+      questionId: p.current_question?.questionId
+    })));
+
+    return {
+      id: room.id,
+      players,
       game_state: room.game_state,
       winner_id: room.winner_id,
       last_activity: room.last_activity,
@@ -171,11 +204,14 @@ export async function addPlayerToRoom(roomId: string, player: Omit<Player, "last
 
     console.log(`Adding player ${player.id} to room ${roomId}. Should be host: ${shouldBeHost}`);
 
+    // Properly serialize the current_question
+    const questionJson = player.current_question ? JSON.stringify(player.current_question) : null;
+
     await client.query(
       `INSERT INTO players (id, room_id, name, language, ready, score, is_host, current_question)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (id) DO UPDATE SET
-       name = $3, last_seen = NOW(), is_host = $7`,
+       name = $3, last_seen = NOW(), is_host = $7, current_question = $8`,
       [
         player.id,
         roomId,
@@ -184,7 +220,7 @@ export async function addPlayerToRoom(roomId: string, player: Omit<Player, "last
         player.ready,
         player.score,
         shouldBeHost,
-        JSON.stringify(player.current_question),
+        questionJson,
       ]
     );
 
@@ -254,7 +290,10 @@ export async function updatePlayer(playerId: string, updates: Partial<Player>): 
     Object.entries(updates).forEach(([key, value]) => {
       if (key === "current_question") {
         updateFields.push(`${key} = $${paramIndex}`);
-        values.push(JSON.stringify(value));
+        // Properly serialize the question object
+        const questionJson = value ? JSON.stringify(value) : null;
+        values.push(questionJson);
+        console.log(`Updating player ${playerId} with question:`, value);
       } else {
         updateFields.push(`${key} = $${paramIndex}`);
         values.push(value);
@@ -270,7 +309,10 @@ export async function updatePlayer(playerId: string, updates: Partial<Player>): 
     }
 
     const query = `UPDATE players SET ${updateFields.join(", ")}, last_seen = NOW() WHERE id = $1`;
-    await client.query(query, values);
+    console.log(`Executing update query for player ${playerId}:`, query, values);
+    
+    const result = await client.query(query, values);
+    console.log(`Update result for player ${playerId}: ${result.rowCount} rows affected`);
 
     // If we're updating host status, ensure room has proper host
     if (updates.hasOwnProperty("is_host")) {
@@ -307,7 +349,10 @@ export async function updateRoom(roomId: string, updates: Partial<Omit<Room, "pl
     if (updateFields.length === 0) return true;
 
     const query = `UPDATE rooms SET ${updateFields.join(", ")}, last_activity = NOW() WHERE id = $1`;
-    await client.query(query, values);
+    console.log(`Updating room ${roomId}:`, query, values);
+    
+    const result = await client.query(query, values);
+    console.log(`Room update result: ${result.rowCount} rows affected`);
 
     return true;
   } catch (error) {

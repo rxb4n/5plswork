@@ -82,7 +82,7 @@ function generateQuestion(language: "french" | "german" | "russian" | "japanese"
   const options = [correctAnswer, ...wrongAnswers].sort(() => Math.random() - 0.5)
 
   const question = {
-    questionId: `q-${questionCounter++}`,
+    questionId: `q-${questionCounter++}-${Date.now()}`,
     english: randomWord.english,
     correctAnswer,
     options,
@@ -255,20 +255,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       socket.on("start-game", async ({ roomId, playerId }, callback) => {
         try {
-          console.log(`Starting game for room ${roomId} by player ${playerId}`)
+          console.log(`=== STARTING GAME ===`)
+          console.log(`Room: ${roomId}, Player: ${playerId}`)
           
           const room = await getRoom(roomId)
           if (!room) {
+            console.log(`Room ${roomId} not found`)
             return callback({ error: "Room not found", status: 404 })
           }
           
           const player = room.players.find((p) => p.id === playerId)
           if (!player || !player.is_host) {
+            console.log(`Player ${playerId} is not host or not found`)
             return callback({ error: "Only the room creator can start the game", status: 403 })
           }
           
           const playersWithLanguage = room.players.filter((p) => p.language)
-          console.log(`Players with language: ${playersWithLanguage.length}`)
+          console.log(`Players with language: ${playersWithLanguage.length}`, playersWithLanguage.map(p => ({ id: p.id, name: p.name, language: p.language })))
           
           if (playersWithLanguage.length === 0) {
             return callback({ error: "At least one player must select a language", status: 400 })
@@ -278,33 +281,57 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "All players with languages must be ready", status: 400 })
           }
 
-          // Update room to playing state
-          console.log(`Setting room ${roomId} to playing state`)
-          await updateRoom(roomId, { game_state: "playing", question_count: 0 })
+          // Step 1: Update room to playing state
+          console.log(`Step 1: Setting room ${roomId} to playing state`)
+          const roomUpdateSuccess = await updateRoom(roomId, { game_state: "playing", question_count: 0 })
+          console.log(`Room update success: ${roomUpdateSuccess}`)
           
-          // Generate questions for all players with languages
-          console.log(`Generating questions for ${playersWithLanguage.length} players`)
+          // Step 2: Generate and assign questions to all players with languages
+          console.log(`Step 2: Generating questions for ${playersWithLanguage.length} players`)
           for (const p of playersWithLanguage) {
             if (p.language) {
-              console.log(`Generating question for player ${p.id} with language ${p.language}`)
+              console.log(`Generating question for player ${p.id} (${p.name}) with language ${p.language}`)
               const question = generateQuestion(p.language)
+              console.log(`Generated question for ${p.id}:`, question)
+              
               const updateSuccess = await updatePlayer(p.id, { current_question: question })
-              console.log(`Question update for player ${p.id}: ${updateSuccess ? 'success' : 'failed'}`)
+              console.log(`Question assignment for player ${p.id}: ${updateSuccess ? 'SUCCESS' : 'FAILED'}`)
+              
+              if (!updateSuccess) {
+                console.error(`Failed to assign question to player ${p.id}`)
+              }
             }
           }
 
-          // Get the updated room with questions
+          // Step 3: Verify the updates by fetching the room again
+          console.log(`Step 3: Verifying room state after updates`)
           const updatedRoom = await getRoom(roomId)
-          console.log(`Updated room players:`, updatedRoom?.players.map(p => ({
-            id: p.id,
-            name: p.name,
-            language: p.language,
-            hasQuestion: !!p.current_question,
-            questionId: p.current_question?.questionId
-          })))
           
+          if (!updatedRoom) {
+            console.error(`Failed to retrieve updated room ${roomId}`)
+            return callback({ error: "Failed to retrieve updated room", status: 500 })
+          }
+          
+          console.log(`Updated room state:`, {
+            gameState: updatedRoom.game_state,
+            playerCount: updatedRoom.players.length,
+            playersWithQuestions: updatedRoom.players.filter(p => p.current_question).length,
+            players: updatedRoom.players.map(p => ({
+              id: p.id,
+              name: p.name,
+              language: p.language,
+              hasQuestion: !!p.current_question,
+              questionId: p.current_question?.questionId,
+              questionEnglish: p.current_question?.english
+            }))
+          })
+          
+          // Step 4: Send response and emit room update
+          console.log(`Step 4: Sending response and emitting room update`)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
+          
+          console.log(`=== GAME START COMPLETE ===`)
         } catch (error) {
           console.error(`Error starting game for room ${roomId}:`, error)
           callback({ error: "Failed to start game", status: 500 })
