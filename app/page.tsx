@@ -74,7 +74,10 @@ export default function LanguageQuizGame() {
   const [targetScore, setTargetScore] = useState(100);
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(false);
 
-  // FIXED: Normalize server room to client expected format with proper language mapping
+  // CRITICAL: Track the previous game state to detect transitions
+  const prevGameStateRef = useRef<GameState>("home");
+
+  // Normalize server room to client expected format
   const normalizeRoom = (serverRoom: ServerRoom): {
     id: string;
     gameState: string;
@@ -87,7 +90,7 @@ export default function LanguageQuizGame() {
       const normalizedPlayer = {
         id: p.id,
         name: p.name,
-        language: p.language, // CRITICAL: Make sure this is properly mapped
+        language: p.language,
         ready: p.ready,
         score: p.score,
         isHost: p.is_host,
@@ -151,6 +154,47 @@ export default function LanguageQuizGame() {
     }
   };
 
+  // CRITICAL: Effect to handle game state transitions and question fetching
+  useEffect(() => {
+    const handleGameStateTransition = async () => {
+      const prevState = prevGameStateRef.current;
+      const currentState = gameState;
+      
+      console.log(`🎮 Game state transition: ${prevState} -> ${currentState}`);
+      
+      // CRITICAL: Only fetch question when transitioning TO playing state
+      if (prevState !== "playing" && currentState === "playing") {
+        console.log(`🎯 Transitioning to playing state, checking for player language...`);
+        
+        if (currentPlayer?.language) {
+          console.log(`✅ Player has language: ${currentPlayer.language}, fetching question immediately...`);
+          
+          const question = await fetchNewQuestion(currentPlayer.language);
+          if (question) {
+            console.log(`✅ Question loaded successfully:`, question);
+            setCurrentQuestion(question);
+            setTimeLeft(10);
+            setSelectedAnswer(null);
+            setShowResult(false);
+            console.log("✅ Question loaded and game started!");
+          } else {
+            console.error("❌ Failed to load question");
+            setConnectionError("Failed to load question");
+          }
+        } else {
+          console.error("❌ No language found for current player");
+          console.error("🔍 Current player data:", currentPlayer);
+          setConnectionError("No language selected");
+        }
+      }
+      
+      // Update the previous state reference
+      prevGameStateRef.current = currentState;
+    };
+
+    handleGameStateTransition();
+  }, [gameState, currentPlayer?.language]); // Depend on both gameState and language
+
   // Initialize Socket.IO connection
   useEffect(() => {
     console.log("Initializing Socket.IO connection...")
@@ -208,7 +252,7 @@ export default function LanguageQuizGame() {
         targetScore: room.targetScore,
       });
 
-      // Always update players list immediately
+      // CRITICAL: Always update players list immediately
       setPlayers(room.players);
       setConnectionError(null);
       setConsecutiveErrors(0);
@@ -219,7 +263,7 @@ export default function LanguageQuizGame() {
         setServerInfo(data.serverInfo);
       }
 
-      // CRITICAL: Find the current player in the updated room data with proper language
+      // CRITICAL: Find and update current player FIRST
       const updatedCurrentPlayer = room.players.find((p: Player) => p.id === currentPlayer?.id);
       if (updatedCurrentPlayer) {
         console.log("🔧 Updated current player:", {
@@ -240,43 +284,17 @@ export default function LanguageQuizGame() {
         return;
       }
 
-      // FIXED: Handle game state transition to playing with immediate question fetch
-      if (room.gameState === "playing" && gameState !== "playing") {
-        console.log("🎮 Game state changed to playing, fetching question immediately...");
+      // CRITICAL: Update game state - the useEffect will handle question fetching
+      if (room.gameState === "playing") {
+        console.log("🎮 Setting game state to playing");
         setGameState("playing");
         setIsStartingGame(false);
-        
-        // Immediately fetch question when transitioning to playing state
-        if (updatedCurrentPlayer?.language) {
-          console.log(`🎯 Player language detected: ${updatedCurrentPlayer.language}, fetching question now...`);
-          
-          // Use async IIFE to handle the promise immediately
-          (async () => {
-            const question = await fetchNewQuestion(updatedCurrentPlayer.language!);
-            if (question) {
-              console.log(`✅ Question loaded successfully:`, question);
-              setCurrentQuestion(question);
-              setTimeLeft(10);
-              setSelectedAnswer(null);
-              setShowResult(false);
-              console.log("✅ Question loaded and game started!");
-            } else {
-              console.error("❌ Failed to load question");
-              setConnectionError("Failed to load question");
-            }
-          })();
-        } else {
-          console.error("❌ No language found for current player");
-          console.error("🔍 Current player data:", updatedCurrentPlayer);
-          console.error("🔍 All players data:", room.players);
-          setConnectionError("No language selected");
-        }
       } else if (room.gameState === "finished" && data.room.winner_id) {
         const winnerPlayer = room.players.find((p) => p.id === data.room.winner_id);
         setWinner(winnerPlayer || null);
         setGameState("finished");
-      } else if (room.gameState === "lobby" && gameState !== "lobby") {
-        console.log("🏠 Game state changed to lobby");
+      } else if (room.gameState === "lobby") {
+        console.log("🏠 Setting game state to lobby");
         setGameState("lobby");
         setCurrentQuestion(null);
         setWinner(null);
