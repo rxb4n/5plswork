@@ -74,25 +74,42 @@ export default function LanguageQuizGame() {
   const [targetScore, setTargetScore] = useState(100);
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(false);
 
-  // Normalize server room to client expected format
+  // FIXED: Normalize server room to client expected format with proper language mapping
   const normalizeRoom = (serverRoom: ServerRoom): {
     id: string;
     gameState: string;
     players: Player[];
     targetScore: number;
-  } => ({
-    id: serverRoom.id,
-    gameState: serverRoom.game_state,
-    players: serverRoom.players.map((p) => ({
-      id: p.id,
-      name: p.name,
-      language: p.language,
-      ready: p.ready,
-      score: p.score,
-      isHost: p.is_host,
-    })),
-    targetScore: serverRoom.target_score || 100,
-  });
+  } => {
+    console.log("🔧 Normalizing room data:", serverRoom);
+    
+    const normalizedPlayers = serverRoom.players.map((p) => {
+      const normalizedPlayer = {
+        id: p.id,
+        name: p.name,
+        language: p.language, // CRITICAL: Make sure this is properly mapped
+        ready: p.ready,
+        score: p.score,
+        isHost: p.is_host,
+      };
+      
+      console.log(`🔧 Normalized player ${p.id}:`, {
+        name: normalizedPlayer.name,
+        language: normalizedPlayer.language,
+        ready: normalizedPlayer.ready,
+        isHost: normalizedPlayer.isHost
+      });
+      
+      return normalizedPlayer;
+    });
+
+    return {
+      id: serverRoom.id,
+      gameState: serverRoom.game_state,
+      players: normalizedPlayers,
+      targetScore: serverRoom.target_score || 100,
+    };
+  };
 
   // Function to fetch a new question from the API
   const fetchNewQuestion = async (language: Language): Promise<Question | null> => {
@@ -202,9 +219,16 @@ export default function LanguageQuizGame() {
         setServerInfo(data.serverInfo);
       }
 
-      // Find the current player in the updated room data
+      // CRITICAL: Find the current player in the updated room data with proper language
       const updatedCurrentPlayer = room.players.find((p: Player) => p.id === currentPlayer?.id);
       if (updatedCurrentPlayer) {
+        console.log("🔧 Updated current player:", {
+          id: updatedCurrentPlayer.id,
+          name: updatedCurrentPlayer.name,
+          language: updatedCurrentPlayer.language,
+          ready: updatedCurrentPlayer.ready,
+          isHost: updatedCurrentPlayer.isHost
+        });
         setCurrentPlayer(updatedCurrentPlayer);
       }
 
@@ -243,6 +267,8 @@ export default function LanguageQuizGame() {
           })();
         } else {
           console.error("❌ No language found for current player");
+          console.error("🔍 Current player data:", updatedCurrentPlayer);
+          console.error("🔍 All players data:", room.players);
           setConnectionError("No language selected");
         }
       } else if (room.gameState === "finished" && data.room.winner_id) {
@@ -455,7 +481,7 @@ export default function LanguageQuizGame() {
         const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayer.id);
         if (updatedPlayer) {
           setCurrentPlayer(updatedPlayer);
-          console.log(`Language updated for player ${currentPlayer.id}`);
+          console.log(`Language updated for player ${currentPlayer.id} to ${updatedPlayer.language}`);
         }
       }
     });
