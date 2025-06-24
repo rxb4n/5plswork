@@ -82,7 +82,7 @@ export default function LanguageQuizGame() {
   // Memoize currentQuestion to prevent unnecessary re-renders
   const memoizedCurrentQuestion = useMemo(() => currentQuestion, [currentQuestion?.questionId]);
 
-  // FIXED: Normalize server room to client expected format
+  // CRITICAL FIX: Normalize server room to client expected format
   const normalizeRoom = (serverRoom: ServerRoom): {
     id: string;
     gameState: string;
