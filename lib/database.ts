@@ -96,13 +96,18 @@ export async function createRoom(roomId: string, options: { target_score?: numbe
   const client = await pool.connect()
   try {
     await client.query(
-      "INSERT INTO rooms (id, target_score) VALUES ($1, $2)",
+      "INSERT INTO rooms (id, target_score) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
       [roomId, options.target_score || 100]
-    )
-    return await getRoom(roomId)
+    );
+    const room = await getRoom(roomId);
+    if (!room) {
+      console.error(`Room ${roomId} could not be created or retrieved`);
+      return null;
+    }
+    return room;
   } catch (error) {
-    console.error("Error creating room:", error)
-    return null
+    console.error("Error creating room:", error);
+    throw error; // Throw error for better API feedback
   } finally {
     client.release()
   }
