@@ -105,27 +105,31 @@ export default function LanguageQuizGame() {
 
   // Initialize Socket.IO connection
   useEffect(() => {
+    console.log("Initializing Socket.IO connection...")
+    
     const newSocket = io({
       path: "/api/socketio",
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
+      forceNew: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 2000,
       timeout: 20000,
+      upgrade: true,
     });
 
     setSocket(newSocket);
 
     newSocket.on("connect", () => {
-      console.log("Socket.IO connected");
+      console.log("Socket.IO connected successfully:", newSocket.id);
       setIsConnected(true);
       setConnectionError(null);
       setConsecutiveErrors(0);
     });
 
-    newSocket.on("disconnect", () => {
-      console.log("Socket.IO disconnected");
+    newSocket.on("disconnect", (reason) => {
+      console.log("Socket.IO disconnected:", reason);
       setIsConnected(false);
-      setConnectionError("Disconnected from server. Attempting to reconnect...");
+      setConnectionError(`Disconnected: ${reason}. Attempting to reconnect...`);
       setConsecutiveErrors((prev) => prev + 1);
     });
 
@@ -133,6 +137,10 @@ export default function LanguageQuizGame() {
       console.error("Socket.IO connect error:", error.message);
       setConnectionError(`Connection error: ${error.message}`);
       setConsecutiveErrors((prev) => prev + 1);
+      
+      if (consecutiveErrors > 3) {
+        setShowRecoveryOption(true);
+      }
     });
 
     newSocket.on("room-update", (data: { room: ServerRoom; serverInfo?: ServerInfo }) => {
@@ -226,6 +234,7 @@ export default function LanguageQuizGame() {
     });
 
     return () => {
+      console.log("Cleaning up Socket.IO connection");
       newSocket.disconnect();
       setSocket(null);
     };

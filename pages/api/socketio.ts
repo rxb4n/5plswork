@@ -93,17 +93,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!res.socket.server.io) {
     await ensureDbInitialized()
 
+    console.log("Initializing Socket.IO server...")
+
     const io = new SocketIOServer(res.socket.server, {
       path: "/api/socketio",
       addTrailingSlash: false,
       cors: {
-        origin: "*",
+        origin: process.env.NODE_ENV === "production" 
+          ? ["https://oneplswork.onrender.com", "https://*.onrender.com"]
+          : "*",
         methods: ["GET", "POST"],
         credentials: true,
       },
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
+      allowEIO3: true,
       pingTimeout: 60000,
       pingInterval: 25000,
+      upgradeTimeout: 30000,
+      maxHttpBufferSize: 1e6,
     })
 
     // Schedule periodic room cleanup (every 10 minutes)
@@ -366,7 +373,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     })
 
     res.socket.server.io = io
+    console.log("Socket.IO server initialized successfully")
   }
 
   res.status(200).end()
+}
+
+// Disable body parsing for Socket.IO
+export const config = {
+  api: {
+    bodyParser: false,
+  },
 }
