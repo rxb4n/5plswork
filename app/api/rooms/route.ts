@@ -24,12 +24,12 @@ async function ensureDbInitialized() {
       console.log("Database initialized successfully");
     } catch (error) {
       console.error("Failed to initialize database:", error);
-      throw new Error(`Database initialization failed: ${(error as Error).message}`);
+      throw error;
     }
   }
 }
 
-// Word database (unchanged)
+// Word database
 const WORD_DATABASE = [
   { english: "Apple", french: "Pomme", german: "Apfel", russian: "яблоко", japanese: "Ringo", spanish: "Manzana" },
   { english: "Car", french: "Voiture", german: "Auto", russian: "машина", japanese: "Kuruma", spanish: "Coche" },
@@ -164,7 +164,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { action, roomId, playerId, data } = body;
 
-    console.log(`API Call: ${action} for room ${roomId} by player ${playerId}`, { data });
+    console.log(`API Call: ${action} for room ${roomId} by player ${playerId}`);
 
     if (!action) {
       return NextResponse.json({ error: "Action is required" }, { status: 400 });
@@ -189,16 +189,17 @@ export async function POST(request: NextRequest) {
     switch (action) {
       case "create":
         try {
-          const existingRoom = await getRoom(roomId);
-          if (existingRoom) {
-            console.log(`Room ${roomId} already exists`);
+          const targetScore = [100, 250, 500].includes(Number(data?.targetScore))
+            ? Number(data.targetScore)
+            : 100;
+          const newRoom = await createRoom(roomId, { target_score: targetScore });
+          if (!newRoom) {
             return NextResponse.json({ error: "Room ID already exists" }, { status: 409 });
           }
-          const newRoom = await createRoom(roomId, { target_score: data?.targetScore || 100 });
           console.log("Room created:", newRoom);
           return NextResponse.json({ success: true, room: newRoom });
         } catch (error) {
-          console.error(`Error creating room ${roomId}:`, error);
+          console.error("Error creating room:", error);
           return NextResponse.json(
             { error: `Failed to create room: ${(error as Error).message}` },
             { status: 500 }
@@ -238,10 +239,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ room: updatedRoom });
         } catch (error) {
           console.error("Error joining room:", error);
-          return NextResponse.json(
-            { error: `Failed to join room: ${(error as Error).message}` },
-            { status: 500 }
-          );
+          return NextResponse.json({ error: "Failed to join room" }, { status: 500 });
         }
 
       case "leave":
@@ -261,10 +259,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ room: updatedRoom });
         } catch (error) {
           console.error("Error leaving room:", error);
-          return NextResponse.json(
-            { error: `Failed to leave room: ${(error as Error).message}` },
-            { status: 500 }
-          );
+          return NextResponse.json({ error: "Failed to leave room" }, { status: 500 });
         }
 
       case "update-language":
@@ -276,7 +271,7 @@ export async function POST(request: NextRequest) {
 
           await updatePlayer(playerId, {
             language: data.language,
-            ready: shouldResetReady ? false : currentPlayer?.ready,
+            ready: shouldResetReady ? false : currentPlayer.ready,
           });
 
           const updatedRoom = await getRoom(roomId);
@@ -284,10 +279,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ room: updatedRoom });
         } catch (error) {
           console.error("Error updating language:", error);
-          return NextResponse.json(
-            { error: `Failed to update language: ${(error as Error).message}` },
-            { status: 500 }
-          );
+          return NextResponse.json({ error: "Failed to update language" }, { status: 500 });
         }
 
       case "toggle-ready":
@@ -306,10 +298,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ room: updatedRoom });
         } catch (error) {
           console.error("Error toggling ready:", error);
-          return NextResponse.json(
-            { error: `Failed to toggle ready: ${(error as Error).message}` },
-            { status: 500 }
-          );
+          return NextResponse.json({ error: "Failed to toggle ready" }, { status: 500 });
         }
 
       case "update-target-score":
@@ -320,7 +309,10 @@ export async function POST(request: NextRequest) {
           }
           const player = room.players.find((p) => p.id === playerId);
           if (!player?.is_host) {
-            return NextResponse.json({ error: "Only the host can update target score" }, { status: 403 });
+            return NextResponse.json(
+              { error: "Only the host can update target score" },
+              { status: 403 }
+            );
           }
           const { targetScore } = data;
           if (![100, 250, 500].includes(targetScore)) {
@@ -332,10 +324,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ room: updatedRoom });
         } catch (error) {
           console.error("Error updating target score:", error);
-          return NextResponse.json(
-            { error: `Failed to update target score: ${(error as Error).message}` },
-            { status: 500 }
-          );
+          return NextResponse.json({ error: "Failed to update target score" }, { status: 500 });
         }
 
       case "start-game":
@@ -352,11 +341,17 @@ export async function POST(request: NextRequest) {
 
           const playersWithLanguage = gameRoom.players.filter((p) => p.language);
           if (playersWithLanguage.length === 0) {
-            return NextResponse.json({ error: "At least one player must select a language" }, { status: 400 });
+            return NextResponse.json(
+              { error: "At least one player must select a language" },
+              { status: 400 }
+            );
           }
 
           if (!playersWithLanguage.every((p) => p.ready)) {
-            return NextResponse.json({ error: "All players with languages must be ready" }, { status: 400 });
+            return NextResponse.json(
+              { error: "All players with languages must be ready" },
+              { status: 400 }
+            );
           }
 
           await updateRoom(roomId, {
@@ -376,10 +371,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ room: updatedRoom });
         } catch (error) {
           console.error("Error starting game:", error);
-          return NextResponse.json(
-            { error: `Failed to start game: ${(error as Error).message}` },
-            { status: 500 }
-          );
+          return NextResponse.json({ error: "Failed to start game" }, { status: 500 });
         }
 
       case "answer":
@@ -421,10 +413,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ room: updatedRoom });
         } catch (error) {
           console.error("Error processing answer:", error);
-          return NextResponse.json(
-            { error: `Failed to process answer: ${(error as Error).message}` },
-            { status: 500 }
-          );
+          return NextResponse.json({ error: "Failed to process answer" }, { status: 500 });
         }
 
       case "restart":
@@ -436,14 +425,21 @@ export async function POST(request: NextRequest) {
 
           const restartHost = restartRoom.players.find((p) => p.id === playerId);
           if (!restartHost?.is_host) {
-            return NextResponse.json({ error: "Only the host can restart the game" }, { status: 403 });
+            return NextResponse.json(
+              { error: "Only the host can restart the game" },
+              { status: 403 }
+            );
           }
+
+          const targetScore = [100, 250, 500].includes(Number(data?.targetScore))
+            ? Number(data.targetScore)
+            : 100;
 
           await updateRoom(roomId, {
             game_state: "lobby",
             winner_id: null,
             question_count: 0,
-            target_score: data.targetScore || 100,
+            target_score: targetScore,
           });
 
           for (const player of restartRoom.players) {
@@ -459,10 +455,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ room: updatedRoom });
         } catch (error) {
           console.error("Error restarting game:", error);
-          return NextResponse.json(
-            { error: `Failed to restart game: ${(error as Error).message}` },
-            { status: 500 }
-          );
+          return NextResponse.json({ error: "Failed to restart game" }, { status: 500 });
         }
 
       case "ping":
@@ -473,10 +466,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ success: true });
         } catch (error) {
           console.error("Error processing ping:", error);
-          return NextResponse.json(
-            { error: `Failed to process ping: ${(error as Error).message}` },
-            { status: 500 }
-          );
+          return NextResponse.json({ error: "Failed to process ping" }, { status: 500 });
         }
 
       default:
@@ -514,14 +504,7 @@ export async function GET(request: NextRequest) {
     const updatedRoom = await getRoom(roomId);
 
     console.log("GET /api/rooms response:", updatedRoom);
-    return NextResponse.json({
-      room: updatedRoom,
-      serverInfo: {
-        processingTime: 10,
-        roomCount: 1,
-        timestamp: Date.now(),
-      },
-    });
+    return NextResponse.json({ room: updatedRoom });
   } catch (error) {
     console.error("GET Error:", error);
     return NextResponse.json(
