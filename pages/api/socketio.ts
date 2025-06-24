@@ -307,6 +307,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
+      // FIXED: Start game handler with proper question assignment
       socket.on("start-game", async ({ roomId, playerId }, callback) => {
         try {
           console.log(`\n=== STARTING GAME ===`)
@@ -342,18 +343,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
           console.log(`✅ Pre-flight checks passed, starting game...`)
 
-          // Step 1: Update room to playing state
-          console.log(`Step 1: Setting room ${roomId} to playing state`)
-          const roomUpdateSuccess = await updateRoom(roomId, { game_state: "playing", question_count: 0 })
-          console.log(`Room update success: ${roomUpdateSuccess}`)
-          
-          if (!roomUpdateSuccess) {
-            console.error(`❌ Failed to update room ${roomId} to playing state`)
-            return callback({ error: "Failed to start game", status: 500 })
-          }
-          
-          // Step 2: Generate and assign questions to all players with languages
-          console.log(`Step 2: Generating questions for ${playersWithLanguage.length} players`)
+          // CRITICAL FIX: Generate questions FIRST, then update room state
+          console.log(`Step 1: Generating questions for ${playersWithLanguage.length} players`)
           const questionAssignments = []
           
           for (const p of playersWithLanguage) {
@@ -378,8 +369,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           
           console.log(`Generated ${questionAssignments.length} questions total`)
           
-          // Step 3: Assign all questions to players
-          console.log(`Step 3: Assigning questions to players`)
+          // Step 2: Assign all questions to players BEFORE changing room state
+          console.log(`Step 2: Assigning questions to players`)
           for (const assignment of questionAssignments) {
             console.log(`Assigning question ${assignment.question.questionId} to player ${assignment.playerId}`)
             const updateSuccess = await updatePlayer(assignment.playerId, { 
@@ -391,6 +382,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               console.error(`❌ Failed to assign question to player ${assignment.playerId}`)
               return callback({ error: `Failed to assign question to player`, status: 500 })
             }
+          }
+
+          // Step 3: ONLY NOW update room to playing state
+          console.log(`Step 3: Setting room ${roomId} to playing state`)
+          const roomUpdateSuccess = await updateRoom(roomId, { game_state: "playing", question_count: 0 })
+          console.log(`Room update success: ${roomUpdateSuccess}`)
+          
+          if (!roomUpdateSuccess) {
+            console.error(`❌ Failed to update room ${roomId} to playing state`)
+            return callback({ error: "Failed to start game", status: 500 })
           }
 
           // Step 4: Verify the updates by fetching the room again
