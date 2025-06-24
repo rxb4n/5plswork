@@ -81,12 +81,15 @@ function generateQuestion(language: "french" | "german" | "russian" | "japanese"
 
   const options = [correctAnswer, ...wrongAnswers].sort(() => Math.random() - 0.5)
 
-  return {
+  const question = {
     questionId: `q-${questionCounter++}`,
     english: randomWord.english,
     correctAnswer,
     options,
   }
+
+  console.log(`Generated question ${question.questionId} for ${language}:`, question)
+  return question
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -252,31 +255,54 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       socket.on("start-game", async ({ roomId, playerId }, callback) => {
         try {
+          console.log(`Starting game for room ${roomId} by player ${playerId}`)
+          
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
           }
+          
           const player = room.players.find((p) => p.id === playerId)
           if (!player || !player.is_host) {
             return callback({ error: "Only the room creator can start the game", status: 403 })
           }
+          
           const playersWithLanguage = room.players.filter((p) => p.language)
+          console.log(`Players with language: ${playersWithLanguage.length}`)
+          
           if (playersWithLanguage.length === 0) {
             return callback({ error: "At least one player must select a language", status: 400 })
           }
+          
           if (!playersWithLanguage.every((p) => p.ready)) {
             return callback({ error: "All players with languages must be ready", status: 400 })
           }
 
+          // Update room to playing state
+          console.log(`Setting room ${roomId} to playing state`)
           await updateRoom(roomId, { game_state: "playing", question_count: 0 })
+          
+          // Generate questions for all players with languages
+          console.log(`Generating questions for ${playersWithLanguage.length} players`)
           for (const p of playersWithLanguage) {
             if (p.language) {
+              console.log(`Generating question for player ${p.id} with language ${p.language}`)
               const question = generateQuestion(p.language)
-              await updatePlayer(p.id, { current_question: question })
+              const updateSuccess = await updatePlayer(p.id, { current_question: question })
+              console.log(`Question update for player ${p.id}: ${updateSuccess ? 'success' : 'failed'}`)
             }
           }
 
+          // Get the updated room with questions
           const updatedRoom = await getRoom(roomId)
+          console.log(`Updated room players:`, updatedRoom?.players.map(p => ({
+            id: p.id,
+            name: p.name,
+            language: p.language,
+            hasQuestion: !!p.current_question,
+            questionId: p.current_question?.questionId
+          })))
+          
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
         } catch (error) {

@@ -155,7 +155,13 @@ export default function LanguageQuizGame() {
       const room = normalizeRoom(data.room);
       console.log("Room update received:", {
         gameState: room.gameState,
-        players: room.players,
+        players: room.players.map(p => ({
+          id: p.id,
+          name: p.name,
+          language: p.language,
+          hasQuestion: !!p.currentQuestion,
+          questionId: p.currentQuestion?.questionId
+        })),
         currentPlayerQuestion: room.players.find((p: Player) => p.id === currentPlayer?.id)?.currentQuestion?.questionId,
         waitingForNewQuestion,
         targetScore: room.targetScore,
