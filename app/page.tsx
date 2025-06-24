@@ -862,6 +862,9 @@ export default function LanguageQuizGame() {
                   <p>Current Question ID: {currentQuestionId || "None"}</p>
                   <p>Waiting for new question: {waitingForNewQuestion ? "Yes" : "No"}</p>
                   <p>Player has question: {currentPlayer?.currentQuestion ? "Yes" : "No"}</p>
+                  {currentPlayer?.currentQuestion && (
+                    <p>Question English: {currentPlayer.currentQuestion.english}</p>
+                  )}
                 </div>
               </CardContent>
             </Card>

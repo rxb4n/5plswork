@@ -286,20 +286,41 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const roomUpdateSuccess = await updateRoom(roomId, { game_state: "playing", question_count: 0 })
           console.log(`Room update success: ${roomUpdateSuccess}`)
           
+          if (!roomUpdateSuccess) {
+            console.error(`Failed to update room ${roomId} to playing state`)
+            return callback({ error: "Failed to start game", status: 500 })
+          }
+          
           // Step 2: Generate and assign questions to all players with languages
           console.log(`Step 2: Generating questions for ${playersWithLanguage.length} players`)
+          const questionAssignments = []
+          
           for (const p of playersWithLanguage) {
             if (p.language) {
               console.log(`Generating question for player ${p.id} (${p.name}) with language ${p.language}`)
               const question = generateQuestion(p.language)
-              console.log(`Generated question for ${p.id}:`, question)
+              console.log(`Generated question for ${p.id}:`, {
+                questionId: question.questionId,
+                english: question.english,
+                correctAnswer: question.correctAnswer,
+                optionsCount: question.options.length
+              })
               
-              const updateSuccess = await updatePlayer(p.id, { current_question: question })
-              console.log(`Question assignment for player ${p.id}: ${updateSuccess ? 'SUCCESS' : 'FAILED'}`)
-              
-              if (!updateSuccess) {
-                console.error(`Failed to assign question to player ${p.id}`)
-              }
+              questionAssignments.push({ playerId: p.id, question })
+            }
+          }
+          
+          // Assign all questions
+          for (const assignment of questionAssignments) {
+            console.log(`Assigning question ${assignment.question.questionId} to player ${assignment.playerId}`)
+            const updateSuccess = await updatePlayer(assignment.playerId, { 
+              current_question: assignment.question 
+            })
+            console.log(`Question assignment for player ${assignment.playerId}: ${updateSuccess ? 'SUCCESS' : 'FAILED'}`)
+            
+            if (!updateSuccess) {
+              console.error(`Failed to assign question to player ${assignment.playerId}`)
+              return callback({ error: `Failed to assign question to player ${assignment.playerId}`, status: 500 })
             }
           }
 
@@ -326,9 +347,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             }))
           })
           
+          // Verify all players with languages have questions
+          const playersWithoutQuestions = updatedRoom.players.filter(p => p.language && !p.current_question)
+          if (playersWithoutQuestions.length > 0) {
+            console.error(`Players without questions:`, playersWithoutQuestions.map(p => ({ id: p.id, name: p.name, language: p.language })))
+            return callback({ error: "Failed to assign questions to all players", status: 500 })
+          }
+          
           // Step 4: Send response and emit room update
           console.log(`Step 4: Sending response and emitting room update`)
           callback({ room: updatedRoom })
+          
+          // Emit to all clients in the room
           io.to(roomId).emit("room-update", { room: updatedRoom })
           
           console.log(`=== GAME START COMPLETE ===`)
@@ -340,29 +370,49 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       socket.on("answer", async ({ roomId, playerId, data }, callback) => {
         try {
+          console.log(`Processing answer from player ${playerId} in room ${roomId}`)
+          
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
           }
+          
           const player = room.players.find((p) => p.id === playerId)
           if (!player || !player.current_question) {
+            console.log(`Player ${playerId} or question not found. Player exists: ${!!player}, Has question: ${!!player?.current_question}`)
             return callback({ error: "Player or question not found", status: 404 })
           }
 
           const { answer, timeLeft } = data
           const isCorrect = answer === player.current_question.correctAnswer
+          
+          console.log(`Answer from ${playerId}: "${answer}", Correct: "${player.current_question.correctAnswer}", Is correct: ${isCorrect}`)
+          
           let newScore = player.score
           if (isCorrect) {
             const points = Math.max(1, Math.round(10 - (10 - timeLeft)))
             newScore = player.score + points
+            console.log(`Player ${playerId} scored ${points} points, new total: ${newScore}`)
+            
             await updatePlayer(playerId, { score: newScore })
+            
+            // Check if player won
             if (newScore >= room.target_score) {
+              console.log(`Player ${playerId} reached target score ${room.target_score}, ending game`)
               await updateRoom(roomId, { game_state: "finished", winner_id: playerId })
+              const finalRoom = await getRoom(roomId)
+              callback({ room: finalRoom })
+              io.to(roomId).emit("room-update", { room: finalRoom })
+              return
             }
           }
+          
+          // Generate next question if game is still ongoing
           if (player.language && room.game_state !== "finished") {
+            console.log(`Generating next question for player ${playerId} with language ${player.language}`)
             const nextQuestion = generateQuestion(player.language)
             await updatePlayer(playerId, { current_question: nextQuestion })
+            console.log(`Next question assigned to ${playerId}: ${nextQuestion.questionId}`)
           }
 
           const updatedRoom = await getRoom(roomId)
@@ -385,12 +435,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Only the room creator can restart the game", status: 403 })
           }
 
+          console.log(`Restarting game in room ${roomId}`)
+          
           await updateRoom(roomId, {
             game_state: "lobby",
             winner_id: null,
             question_count: 0,
             target_score: 100,
           })
+          
           for (const p of room.players) {
             await updatePlayer(p.id, { score: 0, ready: false, current_question: null })
           }
@@ -406,13 +459,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       socket.on("leave-room", async ({ roomId, playerId }) => {
         try {
+          console.log(`Player ${playerId} leaving room ${roomId}`)
           await removePlayerFromRoom(playerId)
           socket.leave(roomId)
+          
           const room = await getRoom(roomId)
           if (!room || room.players.length === 0) {
+            console.log(`Room ${roomId} is now empty, notifying remaining clients`)
             io.to(roomId).emit("error", { message: "Room closed", status: 404 })
             return
           }
+          
           io.to(roomId).emit("room-update", { room })
         } catch (error) {
           console.error(`Error leaving room ${roomId} for player ${playerId}:`, error)
