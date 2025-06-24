@@ -84,11 +84,22 @@ export default function LanguageQuizGame() {
   // Refs for tracking - ISOLATED TIMER IMPLEMENTATION
   const lastProcessedQuestionId = useRef<string | null>(null);
   const currentPlayerId = useRef<string | null>(null);
+  const currentRoomId = useRef<string | null>(null); // Add room ID ref
+  const socketRef = useRef<Socket | null>(null); // Add socket ref
   const questionStartTime = useRef<number | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const isProcessingAnswer = useRef<boolean>(false);
   const currentQuestionRef = useRef<Question | null>(null); // Track current question in ref
   const ignoreRoomUpdates = useRef<boolean>(false); // Flag to ignore room updates during timer
+
+  // Update refs when values change
+  useEffect(() => {
+    socketRef.current = socket;
+  }, [socket]);
+
+  useEffect(() => {
+    currentRoomId.current = roomId;
+  }, [roomId]);
 
   // Normalize server room to client expected format
   const normalizeRoom = (serverRoom: ServerRoom): {
@@ -158,18 +169,39 @@ export default function LanguageQuizGame() {
     }, 100);
   };
 
-  // FIXED: Handle timeout submission with isolated question
+  // FIXED: Handle timeout submission with proper data validation
   const handleTimeoutSubmission = (question: Question) => {
-    if (!question || !currentPlayer || !socket) {
-      console.log("❌ Cannot submit timeout - missing data");
+    console.log("🔍 Checking timeout submission data:");
+    console.log("  - Question:", question ? `${question.questionId} (${question.english})` : "null");
+    console.log("  - Current Player ID:", currentPlayerId.current);
+    console.log("  - Room ID:", currentRoomId.current);
+    console.log("  - Socket:", socketRef.current ? "connected" : "null");
+
+    if (!question) {
+      console.log("❌ Cannot submit timeout - no question");
       return;
     }
 
-    console.log(`⏰ Submitting timeout for question ${question.questionId}`);
+    if (!currentPlayerId.current) {
+      console.log("❌ Cannot submit timeout - no player ID");
+      return;
+    }
+
+    if (!currentRoomId.current) {
+      console.log("❌ Cannot submit timeout - no room ID");
+      return;
+    }
+
+    if (!socketRef.current) {
+      console.log("❌ Cannot submit timeout - no socket connection");
+      return;
+    }
+
+    console.log(`✅ All data available - submitting timeout for question ${question.questionId}`);
     
-    socket.emit("answer", { 
-      roomId, 
-      playerId: currentPlayer.id, 
+    socketRef.current.emit("answer", { 
+      roomId: currentRoomId.current, 
+      playerId: currentPlayerId.current, 
       data: { 
         answer: "", // Empty answer for timeout
         timeLeft: 0,
@@ -182,6 +214,10 @@ export default function LanguageQuizGame() {
       
       if (response?.room) {
         handleAnswerResponse(response);
+      } else {
+        console.error("No room in timeout response:", response);
+        // Force re-enable room updates even if response is bad
+        ignoreRoomUpdates.current = false;
       }
     });
   };
@@ -198,8 +234,12 @@ export default function LanguageQuizGame() {
 
   // FIXED: Submit answer function for manual selections
   const submitAnswer = (answer: string, actualTimeLeft?: number) => {
-    if (isProcessingAnswer.current || !currentQuestionRef.current || !currentPlayer || !socket) {
+    if (isProcessingAnswer.current || !currentQuestionRef.current || !currentPlayerId.current || !socketRef.current) {
       console.log("❌ Cannot submit answer - already processing or missing data");
+      console.log("  - Processing:", isProcessingAnswer.current);
+      console.log("  - Question:", !!currentQuestionRef.current);
+      console.log("  - Player ID:", !!currentPlayerId.current);
+      console.log("  - Socket:", !!socketRef.current);
       return;
     }
 
@@ -218,9 +258,9 @@ export default function LanguageQuizGame() {
     setShowResult(true);
     stopIndividualTimer();
 
-    socket.emit("answer", { 
-      roomId, 
-      playerId: currentPlayer.id, 
+    socketRef.current.emit("answer", { 
+      roomId: currentRoomId.current, 
+      playerId: currentPlayerId.current, 
       data: { 
         answer, 
         timeLeft: timeUsed,
@@ -233,6 +273,10 @@ export default function LanguageQuizGame() {
       
       if (response?.room) {
         handleAnswerResponse(response);
+      } else {
+        console.error("No room in manual answer response:", response);
+        // Force re-enable room updates even if response is bad
+        ignoreRoomUpdates.current = false;
       }
     });
   };
@@ -240,7 +284,7 @@ export default function LanguageQuizGame() {
   // FIXED: Centralized answer response handler
   const handleAnswerResponse = (response: any) => {
     const normalizedRoom = normalizeRoom(response.room);
-    const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayer?.id);
+    const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayerId.current);
     
     setPlayers(normalizedRoom.players);
     setTargetScore(normalizedRoom.targetScore);
@@ -614,6 +658,7 @@ export default function LanguageQuizGame() {
     setIsStartingGame(false);
     lastProcessedQuestionId.current = null;
     currentPlayerId.current = null;
+    currentRoomId.current = null;
   };
 
   // Update player language
@@ -698,7 +743,7 @@ export default function LanguageQuizGame() {
 
   // FIXED: Handle answer selection with isolated timing
   const selectAnswer = (answer: string) => {
-    if (isProcessingAnswer.current || selectedAnswer || !currentQuestionRef.current || !currentPlayer || !socket) {
+    if (isProcessingAnswer.current || selectedAnswer || !currentQuestionRef.current || !currentPlayerId.current || !socketRef.current) {
       console.log("❌ Cannot select answer - already processing or missing data");
       return;
     }
@@ -977,6 +1022,9 @@ export default function LanguageQuizGame() {
                   <p>Game state: {gameState}</p>
                   <p>Processing answer: {isProcessingAnswer.current ? "Yes" : "No"}</p>
                   <p>Ignoring room updates: {ignoreRoomUpdates.current ? "Yes" : "No"}</p>
+                  <p>Player ID: {currentPlayerId.current || "None"}</p>
+                  <p>Room ID: {currentRoomId.current || "None"}</p>
+                  <p>Socket connected: {socketRef.current ? "Yes" : "No"}</p>
                 </div>
               </CardContent>
             </Card>
