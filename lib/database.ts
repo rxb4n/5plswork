@@ -126,27 +126,39 @@ export async function getRoom(roomId: string): Promise<Room | null> {
     const players = playersResult.rows.map((p) => {
       let currentQuestion = null;
       
-      // Safely parse the current_question JSON
+      console.log(`🔍 Processing player ${p.name} (${p.id}) question data:`, {
+        hasCurrentQuestion: !!p.current_question,
+        questionType: typeof p.current_question,
+        questionValue: p.current_question
+      });
+      
+      // CRITICAL FIX: Safely parse the current_question JSON
       if (p.current_question) {
         try {
           if (typeof p.current_question === 'string') {
             currentQuestion = JSON.parse(p.current_question);
-          } else {
+            console.log(`✅ Parsed question from string for ${p.id}:`, currentQuestion);
+          } else if (typeof p.current_question === 'object') {
             currentQuestion = p.current_question;
+            console.log(`✅ Using object question for ${p.id}:`, currentQuestion);
           }
           
           // Validate the question structure
           if (currentQuestion && (!currentQuestion.questionId || !currentQuestion.english || !currentQuestion.correctAnswer || !currentQuestion.options)) {
-            console.warn(`Invalid question structure for player ${p.id}:`, currentQuestion);
+            console.warn(`❌ Invalid question structure for player ${p.id}:`, currentQuestion);
             currentQuestion = null;
+          } else if (currentQuestion) {
+            console.log(`✅ Valid question for ${p.id}: ${currentQuestion.questionId} - "${currentQuestion.english}"`);
           }
         } catch (error) {
-          console.error(`Error parsing current_question for player ${p.id}:`, error);
+          console.error(`❌ Error parsing current_question for player ${p.id}:`, error);
           currentQuestion = null;
         }
+      } else {
+        console.log(`ℹ️ No question for player ${p.id}`);
       }
 
-      return {
+      const playerData = {
         id: p.id,
         name: p.name,
         language: p.language,
@@ -156,9 +168,20 @@ export async function getRoom(roomId: string): Promise<Room | null> {
         current_question: currentQuestion,
         last_seen: p.last_seen,
       };
+
+      console.log(`🔧 Final player data for ${p.id}:`, {
+        name: playerData.name,
+        hasQuestion: !!playerData.current_question,
+        questionId: playerData.current_question?.questionId
+      });
+
+      return playerData;
     });
 
-    console.log(`Retrieved room ${roomId} with ${players.length} players`);
+    console.log(`📊 Retrieved room ${roomId} with ${players.length} players`);
+    players.forEach(p => {
+      console.log(`  - ${p.name}: has question = ${!!p.current_question}, questionId = ${p.current_question?.questionId}`);
+    });
 
     return {
       id: room.id,
@@ -285,10 +308,11 @@ export async function updatePlayer(playerId: string, updates: Partial<Player>): 
     Object.entries(updates).forEach(([key, value]) => {
       if (key === "current_question") {
         updateFields.push(`${key} = $${paramIndex}`);
-        // Properly serialize the question object
+        // CRITICAL: Properly serialize the question object
         const questionJson = value ? JSON.stringify(value) : null;
         values.push(questionJson);
-        console.log(`Updating player ${playerId} with question:`, value ? `${value.questionId} (${value.english})` : 'null');
+        console.log(`🔧 Updating player ${playerId} with question:`, value ? `${value.questionId} (${value.english})` : 'null');
+        console.log(`🔧 Serialized question JSON:`, questionJson);
       } else {
         updateFields.push(`${key} = $${paramIndex}`);
         values.push(value);
@@ -304,10 +328,11 @@ export async function updatePlayer(playerId: string, updates: Partial<Player>): 
     }
 
     const query = `UPDATE players SET ${updateFields.join(", ")}, last_seen = NOW() WHERE id = $1`;
-    console.log(`Executing update query for player ${playerId}:`, query);
+    console.log(`🔧 Executing update query for player ${playerId}:`, query);
+    console.log(`🔧 Query values:`, values);
     
     const result = await client.query(query, values);
-    console.log(`Update result for player ${playerId}: ${result.rowCount} rows affected`);
+    console.log(`✅ Update result for player ${playerId}: ${result.rowCount} rows affected`);
 
     // If we're updating host status, ensure room has proper host
     if (updates.hasOwnProperty("is_host")) {
