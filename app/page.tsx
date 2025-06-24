@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
@@ -21,7 +21,6 @@ interface Player {
   ready: boolean;
   score: number;
   isHost: boolean;
-  currentQuestion?: Question;
 }
 
 interface Question {
@@ -47,7 +46,6 @@ interface ServerRoom {
     ready: boolean;
     score: number;
     is_host: boolean;
-    current_question: Question | null;
   }>;
   winner_id: string | null;
   question_count: number | null;
@@ -73,60 +71,57 @@ export default function LanguageQuizGame() {
   const [showRecoveryOption, setShowRecoveryOption] = useState(false);
   const [isStartingGame, setIsStartingGame] = useState(false);
   const [startGameError, setStartGameError] = useState<string | null>(null);
-  const [creatorId, setCreatorId] = useState<string | null>(null);
-  const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(null);
-  const [waitingForNewQuestion, setWaitingForNewQuestion] = useState(true);
   const [targetScore, setTargetScore] = useState(100);
-  const lastProcessedQuestionId = useRef<string | null>(null);
+  const [isLoadingQuestion, setIsLoadingQuestion] = useState(false);
 
-  // Memoize currentQuestion to prevent unnecessary re-renders
-  const memoizedCurrentQuestion = useMemo(() => currentQuestion, [currentQuestion?.questionId]);
-
-  // CRITICAL FIX: Normalize server room to client expected format
+  // Normalize server room to client expected format
   const normalizeRoom = (serverRoom: ServerRoom): {
     id: string;
     gameState: string;
     players: Player[];
     targetScore: number;
-  } => {
-    console.log("🔧 Normalizing server room data:", {
-      gameState: serverRoom.game_state,
-      playerCount: serverRoom.players.length,
-      playersWithQuestions: serverRoom.players.filter(p => p.current_question).length
-    });
-
-    const normalizedPlayers = serverRoom.players.map((p) => {
-      console.log(`🔧 Raw server player data for ${p.name} (${p.id}):`, {
-        current_question: p.current_question,
-        current_question_type: typeof p.current_question,
-        current_question_keys: p.current_question ? Object.keys(p.current_question) : null
-      });
-
-      return {
-        id: p.id,
-        name: p.name,
-        language: p.language,
-        ready: p.ready,
-        score: p.score,
-        isHost: p.is_host,
-        currentQuestion: p.current_question || undefined, // CRITICAL: Map current_question to currentQuestion
-      };
-    });
-
-    console.log("🔧 Normalized players:", normalizedPlayers.map(p => ({
+  } => ({
+    id: serverRoom.id,
+    gameState: serverRoom.game_state,
+    players: serverRoom.players.map((p) => ({
       id: p.id,
       name: p.name,
-      hasCurrentQuestion: !!p.currentQuestion,
-      questionId: p.currentQuestion?.questionId,
-      questionEnglish: p.currentQuestion?.english
-    })));
+      language: p.language,
+      ready: p.ready,
+      score: p.score,
+      isHost: p.is_host,
+    })),
+    targetScore: serverRoom.target_score || 100,
+  });
 
-    return {
-      id: serverRoom.id,
-      gameState: serverRoom.game_state,
-      players: normalizedPlayers,
-      targetScore: serverRoom.target_score || 100,
-    };
+  // Function to fetch a new question from the API
+  const fetchNewQuestion = async (language: Language): Promise<Question | null> => {
+    try {
+      console.log(`🎯 Fetching new question for language: ${language}`);
+      setIsLoadingQuestion(true);
+      
+      const response = await fetch('/api/get-question', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ language }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log(`✅ Received question:`, data.question);
+      
+      setIsLoadingQuestion(false);
+      return data.question;
+    } catch (error) {
+      console.error(`❌ Error fetching question:`, error);
+      setIsLoadingQuestion(false);
+      return null;
+    }
   };
 
   // Initialize Socket.IO connection
@@ -183,16 +178,10 @@ export default function LanguageQuizGame() {
       console.log("🔄 Room update received:", {
         gameState: room.gameState,
         playerCount: room.players.length,
-        players: room.players.map(p => ({ 
-          id: p.id, 
-          name: p.name,
-          hasQuestion: !!p.currentQuestion,
-          questionId: p.currentQuestion?.questionId 
-        })),
         targetScore: room.targetScore,
       });
 
-      // CRITICAL: Always update players list immediately
+      // Always update players list immediately
       setPlayers(room.players);
       setConnectionError(null);
       setConsecutiveErrors(0);
@@ -203,18 +192,9 @@ export default function LanguageQuizGame() {
         setServerInfo(data.serverInfo);
       }
 
-      // CRITICAL FIX: Find the current player in the updated room data
+      // Find the current player in the updated room data
       const updatedCurrentPlayer = room.players.find((p: Player) => p.id === currentPlayer?.id);
       if (updatedCurrentPlayer) {
-        console.log("🔄 Updated current player:", {
-          id: updatedCurrentPlayer.id,
-          name: updatedCurrentPlayer.name,
-          hasQuestion: !!updatedCurrentPlayer.currentQuestion,
-          questionId: updatedCurrentPlayer.currentQuestion?.questionId,
-          questionEnglish: updatedCurrentPlayer.currentQuestion?.english
-        });
-        
-        // CRITICAL: Update current player state immediately
         setCurrentPlayer(updatedCurrentPlayer);
       }
 
@@ -227,92 +207,34 @@ export default function LanguageQuizGame() {
       }
 
       // Handle game state transition to playing
-      if (room.gameState === "playing") {
-        console.log("🎮 Game state is playing, transitioning to game view");
+      if (room.gameState === "playing" && gameState !== "playing") {
+        console.log("🎮 Game state changed to playing, fetching question...");
         setGameState("playing");
         setIsStartingGame(false);
         
-        // CRITICAL FIX: Use the updated current player data directly
-        const playerWithQuestion = updatedCurrentPlayer || currentPlayer;
-        
-        console.log("🔍 Checking for question on player:", {
-          playerId: playerWithQuestion?.id,
-          playerName: playerWithQuestion?.name,
-          hasCurrentQuestion: !!playerWithQuestion?.currentQuestion,
-          questionId: playerWithQuestion?.currentQuestion?.questionId,
-          questionEnglish: playerWithQuestion?.currentQuestion?.english
-        });
-        
-        if (playerWithQuestion?.currentQuestion) {
-          const newQuestion = playerWithQuestion.currentQuestion;
-          const newQuestionId = newQuestion.questionId;
-          
-          console.log(`🎯 Player has question ${newQuestionId}`);
-          console.log(`📝 Question details:`, {
-            questionId: newQuestionId,
-            english: newQuestion.english,
-            correctAnswer: newQuestion.correctAnswer,
-            optionsCount: newQuestion.options.length,
-            options: newQuestion.options
+        // Fetch a new question when the game starts
+        if (updatedCurrentPlayer?.language) {
+          fetchNewQuestion(updatedCurrentPlayer.language).then((question) => {
+            if (question) {
+              setCurrentQuestion(question);
+              setTimeLeft(10);
+              setSelectedAnswer(null);
+              setShowResult(false);
+            } else {
+              setConnectionError("Failed to load question");
+            }
           });
-          
-          // CRITICAL: Always set the question when we have one
-          console.log(`✅ Setting question ${newQuestionId}`);
-          setCurrentQuestion(newQuestion);
-          setCurrentQuestionId(newQuestionId);
-          setTimeLeft(10);
-          setSelectedAnswer(null);
-          setShowResult(false);
-          setWaitingForNewQuestion(false);
-          lastProcessedQuestionId.current = newQuestionId;
-          console.log("✅ Question set successfully!");
-        } else {
-          console.log("❌ Player has no current question, waiting...");
-          console.log("🔍 Debug - Current player state:", {
-            currentPlayerId: currentPlayer?.id,
-            updatedPlayerId: updatedCurrentPlayer?.id,
-            currentPlayerHasQuestion: !!currentPlayer?.currentQuestion,
-            updatedPlayerHasQuestion: !!updatedCurrentPlayer?.currentQuestion,
-            allPlayersWithQuestions: room.players.filter(p => p.currentQuestion).length,
-            totalPlayers: room.players.length
-          });
-          setWaitingForNewQuestion(true);
-          setCurrentQuestion(null);
-          setCurrentQuestionId(null);
         }
       } else if (room.gameState === "finished" && data.room.winner_id) {
         const winnerPlayer = room.players.find((p) => p.id === data.room.winner_id);
         setWinner(winnerPlayer || null);
         setGameState("finished");
-        setWaitingForNewQuestion(true);
       } else if (room.gameState === "lobby" && gameState !== "lobby") {
-        console.log("🏠 Game state is lobby, transitioning to lobby view");
+        console.log("🏠 Game state changed to lobby");
         setGameState("lobby");
         setCurrentQuestion(null);
-        setCurrentQuestionId(null);
         setWinner(null);
-        setWaitingForNewQuestion(true);
         setIsStartingGame(false);
-        lastProcessedQuestionId.current = null;
-      }
-
-      // Handle question updates during gameplay (for new questions after answers)
-      if (room.gameState === "playing" && updatedCurrentPlayer?.currentQuestion && gameState === "playing") {
-        const newQuestion = updatedCurrentPlayer.currentQuestion;
-        const newQuestionId = newQuestion.questionId;
-        
-        // Only update if it's a different question
-        if (newQuestionId !== lastProcessedQuestionId.current) {
-          console.log(`🔄 New question received during gameplay: ${newQuestionId}`);
-          setCurrentQuestion(newQuestion);
-          setCurrentQuestionId(newQuestionId);
-          setTimeLeft(10);
-          setSelectedAnswer(null);
-          setShowResult(false);
-          setWaitingForNewQuestion(false);
-          lastProcessedQuestionId.current = newQuestionId;
-          console.log("✅ New question set during gameplay");
-        }
       }
     });
 
@@ -343,7 +265,7 @@ export default function LanguageQuizGame() {
 
   // Timer effect
   useEffect(() => {
-    if (gameState === "playing" && timeLeft > 0 && !selectedAnswer && memoizedCurrentQuestion) {
+    if (gameState === "playing" && timeLeft > 0 && !selectedAnswer && currentQuestion) {
       const timer = setInterval(() => {
         setTimeLeft((prev) => {
           const newTime = prev - 1;
@@ -354,12 +276,12 @@ export default function LanguageQuizGame() {
       return () => {
         clearInterval(timer);
       };
-    } else if (timeLeft === 0 && !selectedAnswer && gameState === "playing" && memoizedCurrentQuestion) {
-      console.log(`⏰ Time's up for question ${currentQuestionId}`);
+    } else if (timeLeft === 0 && !selectedAnswer && gameState === "playing" && currentQuestion) {
+      console.log(`⏰ Time's up for question ${currentQuestion.questionId}`);
       setShowResult(true);
       selectAnswer("");
     }
-  }, [gameState, timeLeft, selectedAnswer, memoizedCurrentQuestion, currentQuestionId]);
+  }, [gameState, timeLeft, selectedAnswer, currentQuestion]);
 
   // Generate random room ID
   const generateRoomId = () => {
@@ -398,7 +320,6 @@ export default function LanguageQuizGame() {
         if (joinResponse?.room) {
           const normalizedRoom = normalizeRoom(joinResponse.room);
           setRoomId(newRoomId);
-          setCreatorId(playerId);
           setTargetScore(normalizedRoom.targetScore || 100);
           const serverPlayer = normalizedRoom.players.find((p: Player) => p.id === playerId);
           setCurrentPlayer({
@@ -485,7 +406,7 @@ export default function LanguageQuizGame() {
     });
   };
 
-  // FIXED: Simple leave room with auto-refresh
+  // Leave room with page refresh
   const leaveRoom = () => {
     console.log("🚪 Leaving room - will refresh page");
     
@@ -495,10 +416,10 @@ export default function LanguageQuizGame() {
       socket.emit("leave-room", { roomId, playerId: currentPlayer.id });
     }
 
-    // SIMPLE SOLUTION: Just refresh the page
+    // Simple solution: Just refresh the page
     setTimeout(() => {
       window.location.reload();
-    }, 100); // Small delay to allow server message to be sent
+    }, 100);
   };
 
   // Update player language
@@ -575,20 +496,18 @@ export default function LanguageQuizGame() {
         setIsStartingGame(false);
       } else {
         console.log("Start game succeeded");
-        setWaitingForNewQuestion(true);
-        lastProcessedQuestionId.current = null;
+        // The room-update event will handle the transition to playing state
       }
     });
   };
 
   // Handle answer selection
   const selectAnswer = (answer: string) => {
-    if (selectedAnswer || !memoizedCurrentQuestion || !currentPlayer || !socket) return;
+    if (selectedAnswer || !currentQuestion || !currentPlayer || !socket) return;
 
-    console.log(`🎯 Submitting answer for question ${currentQuestionId}: "${answer}"`);
+    console.log(`🎯 Submitting answer for question ${currentQuestion.questionId}: "${answer}"`);
     setSelectedAnswer(answer);
     setShowResult(true);
-    setWaitingForNewQuestion(true);
 
     socket.emit("answer", { 
       roomId, 
@@ -596,7 +515,7 @@ export default function LanguageQuizGame() {
       data: { 
         answer, 
         timeLeft,
-        questionId: currentQuestionId 
+        questionId: currentQuestion.questionId 
       } 
     }, (response: any) => {
       console.log("Answer response:", response);
@@ -615,27 +534,20 @@ export default function LanguageQuizGame() {
           setWinner(winnerPlayer || null);
           setGameState("finished");
           setCurrentQuestion(null);
-          setCurrentQuestionId(null);
-          setWaitingForNewQuestion(true);
-          lastProcessedQuestionId.current = null;
-        } else if (updatedPlayer?.currentQuestion) {
-          const newQuestionId = updatedPlayer.currentQuestion.questionId;
-          if (newQuestionId !== lastProcessedQuestionId.current) {
-            console.log(`🔄 Setting new question after answer: ${newQuestionId}`);
-            setCurrentQuestion(updatedPlayer.currentQuestion);
-            setCurrentQuestionId(newQuestionId);
-            setTimeLeft(10);
-            setSelectedAnswer(null);
-            setShowResult(false);
-            setWaitingForNewQuestion(false);
-            lastProcessedQuestionId.current = newQuestionId;
-            console.log("✅ New question received:", updatedPlayer.currentQuestion);
-          } else {
-            console.log(`⏭️ No new question after answer, waiting for next update`);
-          }
         } else {
-          console.log(`❌ No new question available after answer`);
-          setWaitingForNewQuestion(true);
+          // Fetch next question after a short delay
+          setTimeout(() => {
+            if (updatedPlayer?.language) {
+              fetchNewQuestion(updatedPlayer.language).then((question) => {
+                if (question) {
+                  setCurrentQuestion(question);
+                  setTimeLeft(10);
+                  setSelectedAnswer(null);
+                  setShowResult(false);
+                }
+              });
+            }
+          }, 2000); // 2 second delay to show result
         }
       }
     });
@@ -646,8 +558,6 @@ export default function LanguageQuizGame() {
     if (!currentPlayer || !currentPlayer.isHost || !socket) return;
     console.log("Restarting game");
     socket.emit("restart", { roomId, playerId: currentPlayer.id }, () => {
-      setWaitingForNewQuestion(true);
-      lastProcessedQuestionId.current = null;
       setTargetScore(100);
     });
   };
@@ -900,27 +810,26 @@ export default function LanguageQuizGame() {
             </div>
           )}
 
-          {!memoizedCurrentQuestion ? (
+          {isLoadingQuestion ? (
             <Card className="text-center">
               <CardHeader>
                 <CardTitle>Loading Question...</CardTitle>
-                <CardDescription>Please wait while the game prepares the next question.</CardDescription>
+                <CardDescription>Please wait while we prepare your question.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-                <div className="mt-4 text-sm text-gray-600">
-                  <p><strong>Debug Info:</strong></p>
-                  <p>Current Question ID: {currentQuestionId || "None"}</p>
-                  <p>Waiting for new question: {waitingForNewQuestion ? "Yes" : "No"}</p>
-                  <p>Player has question: {currentPlayer?.currentQuestion ? "Yes" : "No"}</p>
-                  {currentPlayer?.currentQuestion && (
-                    <p>Question English: {currentPlayer.currentQuestion.english}</p>
-                  )}
-                  <p>Last processed ID: {lastProcessedQuestionId.current || "None"}</p>
-                  <p>Current Player ID: {currentPlayer?.id || "None"}</p>
-                  <p>Players in room: {players.length}</p>
-                  <p>Players with questions: {players.filter(p => p.currentQuestion).length}</p>
-                </div>
+              </CardContent>
+            </Card>
+          ) : !currentQuestion ? (
+            <Card className="text-center">
+              <CardHeader>
+                <CardTitle>No Question Available</CardTitle>
+                <CardDescription>Unable to load question. Please try refreshing the page.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button onClick={() => window.location.reload()} variant="outline">
+                  Refresh Page
+                </Button>
               </CardContent>
             </Card>
           ) : (
@@ -958,19 +867,19 @@ export default function LanguageQuizGame() {
 
               <Card>
                 <CardHeader className="text-center">
-                  <CardTitle className="text-3xl font-bold text-blue-700">{memoizedCurrentQuestion.english}</CardTitle>
+                  <CardTitle className="text-3xl font-bold text-blue-700">{currentQuestion.english}</CardTitle>
                   <CardDescription>Select the correct translation in {currentPlayer?.language}</CardDescription>
                 </CardHeader>
               </Card>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {memoizedCurrentQuestion.options.map((option, index) => {
+                {currentQuestion.options.map((option, index) => {
                   let buttonClass = "h-16 text-lg font-medium";
 
                   if (showResult) {
-                    if (option === memoizedCurrentQuestion.correctAnswer) {
+                    if (option === currentQuestion.correctAnswer) {
                       buttonClass += " bg-green-500 hover:bg-green-500 text-white";
-                    } else if (option === selectedAnswer && option !== memoizedCurrentQuestion.correctAnswer) {
+                    } else if (option === selectedAnswer && option !== currentQuestion.correctAnswer) {
                       buttonClass += " bg-red-500 hover:bg-red-500 text-white";
                     } else {
                       buttonClass += " opacity-50";
@@ -994,7 +903,7 @@ export default function LanguageQuizGame() {
               {showResult && (
                 <Card className="text-center">
                   <CardContent className="pt-6">
-                    {selectedAnswer === memoizedCurrentQuestion.correctAnswer ? (
+                    {selectedAnswer === currentQuestion.correctAnswer ? (
                       <div className="text-green-600">
                         <p className="text-xl font-bold">Correct! 🎉</p>
                         <p>You earned {Math.max(1, 10 - (10 - timeLeft))} points!</p>
@@ -1002,13 +911,13 @@ export default function LanguageQuizGame() {
                     ) : timeLeft === 0 ? (
                       <div className="text-orange-600">
                         <p className="text-xl font-bold">Time's up! ⏰</p>
-                        <p>The correct answer was: {memoizedCurrentQuestion.correctAnswer}</p>
+                        <p>The correct answer was: {currentQuestion.correctAnswer}</p>
                         <p className="text-sm text-red-600 mt-1">-5 points penalty</p>
                       </div>
                     ) : (
                       <div className="text-red-600">
                         <p className="text-xl font-bold">Wrong answer!</p>
-                        <p>The correct answer was: {memoizedCurrentQuestion.correctAnswer}</p>
+                        <p>The correct answer was: {currentQuestion.correctAnswer}</p>
                         <p className="text-sm text-red-600 mt-1">-5 points penalty</p>
                       </div>
                     )}
