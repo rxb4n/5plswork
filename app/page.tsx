@@ -108,7 +108,7 @@ export default function LanguageQuizGame() {
     console.log("Initializing Socket.IO connection...")
     
     const newSocket = io({
-      path: "/api/socketio",
+      path: "pages/api/socketio",
       transports: ["polling", "websocket"],
       forceNew: true,
       reconnectionAttempts: 5,
