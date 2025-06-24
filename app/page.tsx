@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react" // Explicit import for JSX compatibility
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
@@ -69,13 +69,13 @@ export default function LanguageQuizGame() {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [consecutiveErrors, setConsecutiveErrors] = useState(0);
-  const [roomBackup, setRoomBackup] = useState<string | null>(null);
   const [showRecoveryOption, setShowRecoveryOption] = useState(false);
   const [isStartingGame, setIsStartingGame] = useState(false);
   const [startGameError, setStartGameError] = useState<string | null>(null);
   const [creatorId, setCreatorId] = useState<string | null>(null);
   const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(null);
-  const [waitingForNewQuestion, setWaitingForNewQuestion] = useState(true); // New state to control question updates
+  const [waitingForNewQuestion, setWaitingForNewQuestion] = useState(true);
+  const lastProcessedQuestionId = useRef<string | null>(null); // Track last processed questionId
 
   // Memoize currentQuestion to prevent unnecessary re-renders
   const memoizedCurrentQuestion = useMemo(() => currentQuestion, [currentQuestion?.questionId]);
@@ -237,7 +237,8 @@ export default function LanguageQuizGame() {
         console.log("Poll room updates normalized:", {
           gameState: room.gameState,
           players: room.players,
-          currentPlayerQuestion: room.players.find((p: Player) => p.id === currentPlayer?.id)?.currentQuestion,
+          currentPlayerQuestion: room.players.find((p: Player) => p.id === currentPlayer?.id)?.currentQuestion?.questionId,
+          waitingForNewQuestion,
         });
 
         // Enforce creator as host
@@ -273,16 +274,18 @@ export default function LanguageQuizGame() {
 
         if (room.gameState === "playing") {
           setGameState("playing");
-          if (waitingForNewQuestion && updatedCurrentPlayer?.currentQuestion) {
-            // Only update question if waiting for a new one
-            if (updatedCurrentPlayer.currentQuestion.questionId !== currentQuestionId) {
-              console.log(`Setting new question ${updatedCurrentPlayer.currentQuestion.questionId}`);
+          // Only set initial question if no question is active and waiting for one
+          if (waitingForNewQuestion && !currentQuestionId && updatedCurrentPlayer?.currentQuestion) {
+            const newQuestionId = updatedCurrentPlayer.currentQuestion.questionId;
+            if (newQuestionId !== lastProcessedQuestionId.current) {
+              console.log(`Setting initial question ${newQuestionId}`);
               setCurrentQuestion(updatedCurrentPlayer.currentQuestion);
-              setCurrentQuestionId(updatedCurrentPlayer.currentQuestion.questionId);
+              setCurrentQuestionId(newQuestionId);
               setTimeLeft(10);
               setSelectedAnswer(null);
               setShowResult(false);
               setWaitingForNewQuestion(false);
+              lastProcessedQuestionId.current = newQuestionId;
               console.log("New question received:", updatedCurrentPlayer.currentQuestion);
             }
           }
@@ -297,6 +300,7 @@ export default function LanguageQuizGame() {
           setCurrentQuestionId(null);
           setWinner(null);
           setWaitingForNewQuestion(true);
+          lastProcessedQuestionId.current = null;
         }
       } else if (response.status === 404) {
         setConnectionError("Room not found or expired.");
@@ -384,7 +388,7 @@ export default function LanguageQuizGame() {
           console.log(`Timer tick: ${newTime}s for question ${currentQuestionId}`);
           return newTime;
         });
-      }, 100000);
+      }, 1000);
       return () => {
         isMounted = false;
         console.log(`Cleaning up timer for question ${currentQuestionId}`);
@@ -549,6 +553,7 @@ export default function LanguageQuizGame() {
     setCurrentQuestion(null);
     setCurrentQuestionId(null);
     setWaitingForNewQuestion(true);
+    lastProcessedQuestionId.current = null;
   };
 
   // Update player language
@@ -617,24 +622,8 @@ export default function LanguageQuizGame() {
     } else {
       console.log("Start game succeeded:", result);
       setGameState("playing");
-      setWaitingForNewQuestion(true); // Allow first question to load
-      // Poll to ensure question sync
-      for (let i = 0; i < 5; i++) {
-        await new Promise((resolve) => setTimeout(resolve, i * 1000));
-        await pollRoomUpdates();
-        const updatedPlayers = players;
-        const newQuestion = updatedPlayers.find((p: Player) => p.id === currentPlayer.id)?.currentQuestion;
-        if (newQuestion && waitingForNewQuestion) {
-          console.log(`Initial question set after start: ${newQuestion.questionId}`);
-          setCurrentQuestion(newQuestion);
-          setCurrentQuestionId(newQuestion.questionId);
-          setTimeLeft(10);
-          setSelectedAnswer(null);
-          setShowResult(false);
-          setWaitingForNewQuestion(false);
-          break;
-        }
-      }
+      setWaitingForNewQuestion(true);
+      lastProcessedQuestionId.current = null;
     }
   };
 
@@ -645,6 +634,7 @@ export default function LanguageQuizGame() {
     console.log(`Submitting answer for question ${currentQuestionId}: ${answer}`);
     setSelectedAnswer(answer);
     setShowResult(true);
+    setWaitingForNewQuestion(true); // Allow next question
 
     const result = await apiCall("answer", { answer, timeLeft }, currentPlayer.id);
     console.log("Answer API result:", result);
@@ -652,24 +642,42 @@ export default function LanguageQuizGame() {
     if (result?.room) {
       const normalizedRoom = normalizeRoom(result.room);
       const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayer.id);
+      setPlayers(normalizedRoom.players);
+
       if (updatedPlayer) {
         setCurrentPlayer({
           ...updatedPlayer,
           isHost: updatedPlayer.id === creatorId,
         });
-        if (updatedPlayer.currentQuestion && updatedPlayer.currentQuestion.questionId !== currentQuestionId) {
-          console.log(`Setting new question after answer: ${updatedPlayer.currentQuestion.questionId}`);
+      }
+
+      if (normalizedRoom.gameState === "finished" && result.room.winner_id) {
+        const winnerPlayer = normalizedRoom.players.find((p) => p.id === result.room.winner_id);
+        setWinner(winnerPlayer || null);
+        setGameState("finished");
+        setCurrentQuestion(null);
+        setCurrentQuestionId(null);
+        setWaitingForNewQuestion(true);
+        lastProcessedQuestionId.current = null;
+      } else if (updatedPlayer?.currentQuestion) {
+        const newQuestionId = updatedPlayer.currentQuestion.questionId;
+        if (newQuestionId !== lastProcessedQuestionId.current) {
+          console.log(`Setting new question after answer: ${newQuestionId}`);
           setCurrentQuestion(updatedPlayer.currentQuestion);
-          setCurrentQuestionId(updatedPlayer.currentQuestion.questionId);
+          setCurrentQuestionId(newQuestionId);
           setTimeLeft(10);
           setSelectedAnswer(null);
           setShowResult(false);
           setWaitingForNewQuestion(false);
+          lastProcessedQuestionId.current = newQuestionId;
+          console.log("New question received:", updatedPlayer.currentQuestion);
         } else {
-          setWaitingForNewQuestion(true); // Allow next question on poll
+          console.log(`No new question after answer, waiting for next poll`);
         }
+      } else {
+        console.log(`No new question available after answer`);
+        setWaitingForNewQuestion(true);
       }
-      setPlayers(normalizedRoom.players);
     }
   };
 
@@ -679,6 +687,7 @@ export default function LanguageQuizGame() {
     console.log("Restarting game");
     await apiCall("restart", {}, currentPlayer.id);
     setWaitingForNewQuestion(true);
+    lastProcessedQuestionId.current = null;
   };
 
   // Connection status indicator
