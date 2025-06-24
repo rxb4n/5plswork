@@ -83,6 +83,7 @@ export default function LanguageQuizGame() {
 
   // Refs for tracking
   const lastProcessedQuestionId = useRef<string | null>(null);
+  const currentPlayerId = useRef<string | null>(null); // CRITICAL FIX: Track player ID separately
 
   // FIXED: Normalize server room to client expected format
   const normalizeRoom = (serverRoom: ServerRoom): {
@@ -203,8 +204,8 @@ export default function LanguageQuizGame() {
         setServerInfo(data.serverInfo);
       }
 
-      // Find the current player in the updated room data
-      const updatedCurrentPlayer = room.players.find((p: Player) => p.id === currentPlayer?.id);
+      // CRITICAL FIX: Find the current player using the stored player ID
+      const updatedCurrentPlayer = room.players.find((p: Player) => p.id === currentPlayerId.current);
       if (updatedCurrentPlayer) {
         console.log("Updated current player:", {
           id: updatedCurrentPlayer.id,
@@ -214,6 +215,9 @@ export default function LanguageQuizGame() {
           questionEnglish: updatedCurrentPlayer.currentQuestion?.english
         });
         setCurrentPlayer(updatedCurrentPlayer);
+      } else {
+        console.log("❌ Could not find current player with ID:", currentPlayerId.current);
+        console.log("Available players:", room.players.map(p => ({ id: p.id, name: p.name })));
       }
 
       // Handle game state transitions
@@ -354,6 +358,8 @@ export default function LanguageQuizGame() {
 
     const newRoomId = generateRoomId();
     const playerId = `player-${Date.now()}`;
+    currentPlayerId.current = playerId; // CRITICAL FIX: Store player ID
+    
     const player: Player = {
       id: playerId,
       name: playerName.trim(),
@@ -400,6 +406,8 @@ export default function LanguageQuizGame() {
     if (!playerName.trim() || !roomId.trim() || !socket) return;
 
     const playerId = `player-${Date.now()}`;
+    currentPlayerId.current = playerId; // CRITICAL FIX: Store player ID
+    
     const targetRoomId = roomId.trim();
     const player: Player = {
       id: playerId,
@@ -443,10 +451,10 @@ export default function LanguageQuizGame() {
 
   // Attempt room recovery
   const attemptRoomRecovery = () => {
-    if (!roomId || !currentPlayer || !socket) return;
+    if (!roomId || !currentPlayerId.current || !socket) return;
 
     setConnectionError("Attempting to recover room...");
-    socket.emit("join-room", { roomId, playerId: currentPlayer.id, data: { name: currentPlayer.name } }, (response: any) => {
+    socket.emit("join-room", { roomId, playerId: currentPlayerId.current, data: { name: currentPlayer?.name || "Unknown" } }, (response: any) => {
       if (response?.room) {
         const normalizedRoom = normalizeRoom(response.room);
         setPlayers(normalizedRoom.players);
@@ -464,8 +472,8 @@ export default function LanguageQuizGame() {
 
   // Leave room
   const leaveRoom = () => {
-    if (currentPlayer && socket) {
-      socket.emit("leave-room", { roomId, playerId: currentPlayer.id });
+    if (currentPlayerId.current && socket) {
+      socket.emit("leave-room", { roomId, playerId: currentPlayerId.current });
     }
 
     if (socket) {
@@ -488,22 +496,23 @@ export default function LanguageQuizGame() {
     setTargetScore(100);
     setIsStartingGame(false);
     lastProcessedQuestionId.current = null;
+    currentPlayerId.current = null; // CRITICAL FIX: Clear player ID
   };
 
   // Update player language
   const updateLanguage = (language: Language) => {
-    if (!language || !currentPlayer || !socket) return;
+    if (!language || !currentPlayerId.current || !socket) return;
 
-    console.log(`Updating language for player ${currentPlayer.id} to ${language}`);
-    socket.emit("update-language", { roomId, playerId: currentPlayer.id, data: { language } }, (response: any) => {
+    console.log(`Updating language for player ${currentPlayerId.current} to ${language}`);
+    socket.emit("update-language", { roomId, playerId: currentPlayerId.current, data: { language } }, (response: any) => {
       if (response?.room) {
         const normalizedRoom = normalizeRoom(response.room);
         setPlayers(normalizedRoom.players);
         setTargetScore(normalizedRoom.targetScore);
-        const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayer.id);
+        const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayerId.current);
         if (updatedPlayer) {
           setCurrentPlayer(updatedPlayer);
-          console.log(`Language updated for player ${currentPlayer.id}`);
+          console.log(`Language updated for player ${currentPlayerId.current}`);
         }
       }
     });
@@ -878,6 +887,7 @@ export default function LanguageQuizGame() {
                   <p>Player has question: {currentPlayer?.currentQuestion ? "Yes" : "No"}</p>
                   <p>Player language: {currentPlayer?.language || "None"}</p>
                   <p>Game state: {gameState}</p>
+                  <p>Player ID: {currentPlayerId.current || "None"}</p>
                   {currentPlayer?.currentQuestion && (
                     <>
                       <p>Question English: {currentPlayer.currentQuestion.english}</p>
