@@ -202,7 +202,7 @@ export default function LanguageQuizGame() {
         setServerInfo(data.serverInfo);
       }
 
-      // Find the current player in the updated room data
+      // CRITICAL FIX: Find the current player in the updated room data
       const updatedCurrentPlayer = room.players.find((p: Player) => p.id === currentPlayer?.id);
       if (updatedCurrentPlayer) {
         console.log("🔄 Updated current player:", {
@@ -211,6 +211,8 @@ export default function LanguageQuizGame() {
           hasQuestion: !!updatedCurrentPlayer.currentQuestion,
           questionId: updatedCurrentPlayer.currentQuestion?.questionId
         });
+        
+        // CRITICAL: Update current player state immediately
         setCurrentPlayer(updatedCurrentPlayer);
       }
 
@@ -228,9 +230,11 @@ export default function LanguageQuizGame() {
         setGameState("playing");
         setIsStartingGame(false);
         
-        // CRITICAL FIX: Check for question in the updated player data
-        if (updatedCurrentPlayer?.currentQuestion) {
-          const newQuestion = updatedCurrentPlayer.currentQuestion;
+        // CRITICAL FIX: Use the updated current player data
+        const playerWithQuestion = updatedCurrentPlayer || currentPlayer;
+        
+        if (playerWithQuestion?.currentQuestion) {
+          const newQuestion = playerWithQuestion.currentQuestion;
           const newQuestionId = newQuestion.questionId;
           
           console.log(`🎯 Player has question ${newQuestionId}`);
@@ -253,6 +257,12 @@ export default function LanguageQuizGame() {
           console.log("✅ Question set successfully!");
         } else {
           console.log("❌ Player has no current question, waiting...");
+          console.log("🔍 Debug - Current player state:", {
+            currentPlayerId: currentPlayer?.id,
+            updatedPlayerId: updatedCurrentPlayer?.id,
+            currentPlayerHasQuestion: !!currentPlayer?.currentQuestion,
+            updatedPlayerHasQuestion: !!updatedCurrentPlayer?.currentQuestion
+          });
           setWaitingForNewQuestion(true);
           setCurrentQuestion(null);
           setCurrentQuestionId(null);
@@ -894,6 +904,9 @@ export default function LanguageQuizGame() {
                     <p>Question English: {currentPlayer.currentQuestion.english}</p>
                   )}
                   <p>Last processed ID: {lastProcessedQuestionId.current || "None"}</p>
+                  <p>Current Player ID: {currentPlayer?.id || "None"}</p>
+                  <p>Players in room: {players.length}</p>
+                  <p>Players with questions: {players.filter(p => p.currentQuestion).length}</p>
                 </div>
               </CardContent>
             </Card>
