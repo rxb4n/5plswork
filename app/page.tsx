@@ -109,11 +109,11 @@ export default function LanguageQuizGame() {
   // Initialize Socket.IO connection
   useEffect(() => {
     const newSocket = io({
-      path: "/api/socket",
-      transports: ["websocket"],
-      reconnectionAttempts: 5,
-      reconnectionDelay: 2000,
-    });
+    path: "/api/socket",
+    transports: ["websocket", "polling"], // Enable polling fallback
+    reconnectionAttempts: 5,
+    reconnectionDelay: 2000,
+  });
 
     setSocket(newSocket);
 
@@ -261,6 +261,17 @@ export default function LanguageQuizGame() {
       transports: ["websocket", "polling"],
     });
 
+    // page.tsx
+const socket = useMemo(() => {
+    // Connect to the same origin, but specify the path for the Socket.IO server
+    const s = io({
+      path: "/api/socket",
+      transports: ["websocket"],
+      timeout: 60000, // Try increasing this dramatically for testing
+    });
+    // ... rest of your code
+}, []);
+
     socketInstance.on("connect", () => {
       console.log("Connected to Socket.IO server:", socketInstance.id);
     });
@@ -284,7 +295,7 @@ export default function LanguageQuizGame() {
     return () => {
       socketInstance.disconnect();
     };
-    
+
       return () => {
         isMounted = false;
         console.log(`Cleaning up timer for question ${currentQuestionId}`);
