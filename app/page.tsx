@@ -84,26 +84,47 @@ export default function LanguageQuizGame() {
   // Refs for tracking
   const lastProcessedQuestionId = useRef<string | null>(null);
 
-  // Normalize server room to client expected format
+  // FIXED: Normalize server room to client expected format
   const normalizeRoom = (serverRoom: ServerRoom): {
     id: string;
     gameState: string;
     players: Player[];
     targetScore: number;
-  } => ({
-    id: serverRoom.id,
-    gameState: serverRoom.game_state,
-    players: serverRoom.players.map((p) => ({
+  } => {
+    console.log("🔄 NORMALIZING ROOM DATA");
+    console.log("Raw server room:", serverRoom);
+    
+    const normalizedPlayers = serverRoom.players.map((p) => {
+      console.log(`Normalizing player ${p.name} (${p.id}):`, {
+        hasCurrentQuestion: !!p.current_question,
+        questionData: p.current_question
+      });
+      
+      return {
+        id: p.id,
+        name: p.name,
+        language: p.language,
+        ready: p.ready,
+        score: p.score,
+        isHost: p.is_host,
+        currentQuestion: p.current_question || undefined, // CRITICAL: Map current_question to currentQuestion
+      };
+    });
+
+    console.log("Normalized players:", normalizedPlayers.map(p => ({
       id: p.id,
       name: p.name,
-      language: p.language,
-      ready: p.ready,
-      score: p.score,
-      isHost: p.is_host,
-      currentQuestion: p.current_question || undefined,
-    })),
-    targetScore: serverRoom.target_score || 100,
-  });
+      hasQuestion: !!p.currentQuestion,
+      questionId: p.currentQuestion?.questionId
+    })));
+
+    return {
+      id: serverRoom.id,
+      gameState: serverRoom.game_state,
+      players: normalizedPlayers,
+      targetScore: serverRoom.target_score || 100,
+    };
+  };
 
   // Initialize Socket.IO connection
   useEffect(() => {
@@ -229,6 +250,7 @@ export default function LanguageQuizGame() {
           console.log("✅ Question set successfully!");
         } else {
           console.log("❌ No question found for current player");
+          console.log("Current player data:", updatedCurrentPlayer);
           setCurrentQuestion(null);
         }
       } else if (room.gameState === "finished" && data.room.winner_id) {
