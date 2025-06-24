@@ -1,5 +1,36 @@
 import { Pool } from "pg"
 
+export type Language = "french" | "german" | "russian" | "japanese" | "spanish";
+
+export interface Question {
+  questionId: string;
+  english: string;
+  correctAnswer: string;
+  options: string[];
+}
+
+export interface Player {
+  id: string;
+  name: string;
+  language: Language | null;
+  ready: boolean;
+  score: number;
+  is_host: boolean;
+  current_question: Question | null;
+  last_seen: Date;
+}
+
+export interface Room {
+  id: string;
+  players: Player[];
+  game_state: "lobby" | "playing" | "finished";
+  winner_id?: string;
+  last_activity: Date;
+  created_at: Date;
+  question_count: number;
+  target_score: number; // Added target_score
+}
+
 // Database connection with better error handling for Render
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -9,34 +40,13 @@ const pool = new Pool({
   connectionTimeoutMillis: 2000,
 })
 
-export interface Player {
-  id: string
-  name: string
-  language: "french" | "german" | "russian" | null
-  ready: boolean
-  score: number
-  is_host: boolean
-  current_question: any
-  last_seen: Date
-}
-
-export interface Room {
-  id: string
-  players: Player[]
-  game_state: "lobby" | "playing" | "finished"
-  winner_id?: string
-  last_activity: Date
-  created_at: Date
-  question_count: number
-}
-
 // Initialize database tables
 export async function initDatabase() {
   const client = await pool.connect()
   try {
     console.log("Initializing database...")
 
-    // Create rooms table
+    // Create rooms table with target_score
     await client.query(`
       CREATE TABLE IF NOT EXISTS rooms (
         id VARCHAR(6) PRIMARY KEY,
@@ -44,7 +54,8 @@ export async function initDatabase() {
         winner_id VARCHAR(50),
         last_activity TIMESTAMP DEFAULT NOW(),
         created_at TIMESTAMP DEFAULT NOW(),
-        question_count INTEGER DEFAULT 0
+        question_count INTEGER DEFAULT 0,
+        target_score INTEGER DEFAULT 100
       )
     `)
 
@@ -81,10 +92,13 @@ export async function initDatabase() {
 }
 
 // Room operations
-export async function createRoom(roomId: string): Promise<Room | null> {
+export async function createRoom(roomId: string, options: { target_score?: number } = { target_score: 100 }): Promise<Room | null> {
   const client = await pool.connect()
   try {
-    await client.query("INSERT INTO rooms (id) VALUES ($1)", [roomId])
+    await client.query(
+      "INSERT INTO rooms (id, target_score) VALUES ($1, $2)",
+      [roomId, options.target_score || 100]
+    )
     return await getRoom(roomId)
   } catch (error) {
     console.error("Error creating room:", error)
@@ -115,6 +129,7 @@ export async function getRoom(roomId: string): Promise<Room | null> {
       last_activity: room.last_activity,
       created_at: room.created_at,
       question_count: room.question_count,
+      target_score: room.target_score, // Added target_score
     }
   } catch (error) {
     console.error("Error getting room:", error)

@@ -150,7 +150,7 @@ function generateQuestion(language: "french" | "german" | "russian" | "japanese"
   const options = [correctAnswer, ...wrongAnswers].sort(() => Math.random() - 0.5);
 
   return {
-    questionId: `q-${questionCounter++}`, // Unique ID for each question
+    questionId: `q-${questionCounter++}`,
     english: randomWord.english,
     correctAnswer,
     options,
@@ -159,7 +159,6 @@ function generateQuestion(language: "french" | "german" | "russian" | "japanese"
 
 export async function POST(request: NextRequest) {
   try {
-    // Ensure database is initialized
     await ensureDbInitialized();
 
     const body = await request.json();
@@ -167,7 +166,6 @@ export async function POST(request: NextRequest) {
 
     console.log(`API Call: ${action} for room ${roomId} by player ${playerId}`);
 
-    // Validate required parameters
     if (!action) {
       return NextResponse.json({ error: "Action is required" }, { status: 400 });
     }
@@ -180,9 +178,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Player ID is required" }, { status: 400 });
     }
 
-    // Cleanup old rooms periodically
     if (Math.random() < 0.1) {
-      // 10% chance
       try {
         await cleanupOldRooms();
       } catch (error) {
@@ -193,7 +189,7 @@ export async function POST(request: NextRequest) {
     switch (action) {
       case "create":
         try {
-          const newRoom = await createRoom(roomId);
+          const newRoom = await createRoom(roomId, { target_score: 100 });
           if (!newRoom) {
             return NextResponse.json({ error: "Failed to create room" }, { status: 500 });
           }
@@ -211,7 +207,6 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "Room not found" }, { status: 404 });
           }
 
-          // Determine if this player should be the host
           const shouldBeHost = room.players.length === 0;
 
           const player: Omit<Player, "last_seen"> = {
@@ -231,7 +226,6 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "Failed to join room" }, { status: 500 });
           }
 
-          // Ensure room has proper host assignment
           await ensureRoomHasHost(roomId);
 
           const updatedRoom = await getRoom(roomId);
@@ -252,7 +246,6 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ success: true });
           }
 
-          // Ensure there's still a host after player leaves
           await ensureRoomHasHost(roomId);
 
           const updatedRoom = await getRoom(roomId);
@@ -265,11 +258,9 @@ export async function POST(request: NextRequest) {
 
       case "update-language":
         try {
-          // Get current player state to preserve ready status if they already had a language
           const currentRoom = await getRoom(roomId);
           const currentPlayer = currentRoom?.players.find((p) => p.id === playerId);
 
-          // Only reset ready status if the player didn't have a language before
           const shouldResetReady = !currentPlayer?.language;
 
           await updatePlayer(playerId, {
@@ -304,6 +295,29 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: "Failed to toggle ready" }, { status: 500 });
         }
 
+      case "update-target-score":
+        try {
+          const room = await getRoom(roomId);
+          if (!room) {
+            return NextResponse.json({ error: "Room not found" }, { status: 404 });
+          }
+          const player = room.players.find((p) => p.id === playerId);
+          if (!player?.is_host) {
+            return NextResponse.json({ error: "Only the host can update target score" }, { status: 403 });
+          }
+          const { targetScore } = data;
+          if (![100, 250, 500].includes(targetScore)) {
+            return NextResponse.json({ error: "Invalid target score" }, { status: 400 });
+          }
+          await updateRoom(roomId, { target_score: targetScore });
+          const updatedRoom = await getRoom(roomId);
+          console.log(`Room ${roomId} target score updated to ${targetScore}`);
+          return NextResponse.json({ room: updatedRoom });
+        } catch (error) {
+          console.error("Error updating target score:", error);
+          return NextResponse.json({ error: "Failed to update target score" }, { status: 500 });
+        }
+
       case "start-game":
         try {
           const gameRoom = await getRoom(roomId);
@@ -316,7 +330,6 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "Only the host can start the game" }, { status: 403 });
           }
 
-          // Check if all players have selected a language and are ready
           const playersWithLanguage = gameRoom.players.filter((p) => p.language);
           if (playersWithLanguage.length === 0) {
             return NextResponse.json({ error: "At least one player must select a language" }, { status: 400 });
@@ -331,7 +344,6 @@ export async function POST(request: NextRequest) {
             question_count: 0,
           });
 
-          // Generate questions for all players with languages
           for (const player of playersWithLanguage) {
             if (player.language) {
               const question = generateQuestion(player.language);
@@ -365,7 +377,7 @@ export async function POST(request: NextRequest) {
 
               await updatePlayer(playerId, { score: newScore });
 
-              if (newScore >= 100) {
+              if (newScore >= answerRoom.target_score) {
                 await updateRoom(roomId, {
                   game_state: "finished",
                   winner_id: playerId,
@@ -376,7 +388,6 @@ export async function POST(request: NextRequest) {
               }
             }
 
-            // Generate next question
             if (answeringPlayer.language) {
               const nextQuestion = generateQuestion(answeringPlayer.language);
               await updatePlayer(playerId, { current_question: nextQuestion });
@@ -406,9 +417,9 @@ export async function POST(request: NextRequest) {
             game_state: "lobby",
             winner_id: null,
             question_count: 0,
+            target_score: 100,
           });
 
-          // Reset all players
           for (const player of restartRoom.players) {
             await updatePlayer(player.id, {
               score: 0,
@@ -428,7 +439,6 @@ export async function POST(request: NextRequest) {
       case "ping":
         try {
           if (playerId) {
-            // Just update last_seen timestamp
             await updatePlayer(playerId, {});
           }
           return NextResponse.json({ success: true });
@@ -454,7 +464,6 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    // Ensure database is initialized
     await ensureDbInitialized();
 
     const { searchParams } = new URL(request.url);
@@ -469,7 +478,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Room not found" }, { status: 404 });
     }
 
-    // Ensure room has proper host before returning
     await ensureRoomHasHost(roomId);
     const updatedRoom = await getRoom(roomId);
 
