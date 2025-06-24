@@ -1,4 +1,5 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { Server as SocketIOServer } from "socket.io";
+import { NextApiRequest, NextApiResponse } from "next";
 import {
   initDatabase,
   createRoom,
@@ -6,11 +7,10 @@ import {
   addPlayerToRoom,
   updatePlayer,
   updateRoom,
-  deleteRoom,
   removePlayerFromRoom,
   cleanupOldRooms,
-  ensureRoomHasHost,
   type Player,
+  type Question,
 } from "../../../lib/database";
 
 // Initialize database on startup
@@ -134,7 +134,7 @@ const WORD_DATABASE = [
 // Counter for generating unique question IDs
 let questionCounter = 0;
 
-function generateQuestion(language: "french" | "german" | "russian") {
+function generateQuestion(language: "french" | "german" | "russian" | "japanese" | "spanish"): Question {
   const randomWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)];
   const correctAnswer = randomWord[language];
 
@@ -157,312 +157,348 @@ function generateQuestion(language: "french" | "german" | "russian") {
   };
 }
 
-export async function POST(request: NextRequest) {
-  try {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (!res.socket.server.io) {
     await ensureDbInitialized();
-    const body = await request.json();
-    const { action, roomId, playerId, data } = body;
 
-    console.log(`API Call: ${action} for room ${roomId} by player ${playerId}`);
+    const io = new SocketIOServer(res.socket.server, {
+      path: "/api/socket",
+      addTrailingSlash: false,
+    });
 
-    if (!action) {
-      return NextResponse.json({ error: "Action is required" }, { status: 400 });
-    }
-    if (!roomId && action !== "ping") {
-      return NextResponse.json({ error: "Room ID is required" }, { status: 400 });
-    }
-    if (!playerId && action !== "ping") {
-      return NextResponse.json({ error: "Player ID is required" }, { status: 400 });
-    }
-
-    if (Math.random() < 0.1) {
+    // Schedule periodic room cleanup (every 10 minutes)
+    setInterval(async () => {
       try {
-        await cleanupOldRooms();
+        await cleanupOldRooms(io);
       } catch (error) {
-        console.warn("Failed to cleanup old rooms:", error);
+        console.error("Failed to cleanup old rooms:", error);
       }
-    }
+    }, 10 * 60 * 1000);
 
-    switch (action) {
-      case "create":
+    io.on("connection", (socket) => {
+      console.log("New Socket.IO connection:", socket.id);
+
+      socket.on("create-room", async ({ roomId, playerId, data }, callback) => {
         try {
-          const targetScore = [100, 250, 500].includes(Number(data?.targetScore))
-            ? Number(data.targetScore)
-            : 100;
-          const newRoom = await createRoom(roomId, { target_score: targetScore });
-          if (!newRoom) {
-            return NextResponse.json({ error: "Failed to create room" }, { status: 500 });
+          const targetScore = [100, 250, 500].includes(Number(data?.targetScore)) ? Number(data.targetScore) : 100;
+          const room = await createRoom(roomId, { creator_id: playerId, target_score: targetScore });
+          if (!room) {
+            return callback({ error: "Failed to create room", status: 500 });
           }
-          console.log("Room created:", newRoom);
-          return NextResponse.json({ success: true, room: newRoom });
+          socket.join(roomId);
+          const serverInfo = {
+            processingTime: Date.now() - socket.handshake.time,
+            roomCount: (await io.allSockets()).size,
+            timestamp: Date.now(),
+          };
+          callback({ room });
+          io.to(roomId).emit("room-update", { room, serverInfo });
         } catch (error) {
-          console.error("Error creating room:", error);
-          return NextResponse.json({ error: "Failed to create room" }, { status: 500 });
+          console.error(`Error creating room ${roomId}:`, error);
+          callback({ error: "Failed to create room", status: 500 });
         }
+      });
 
-
-      case "join":
+      socket.on("join-room", async ({ roomId, playerId, data }, callback) => {
         try {
           const room = await getRoom(roomId);
           if (!room) {
-            return NextResponse.json({ error: "Room not found" }, { status: 404 });
+            return callback({ error: "Room not found", status: 404 });
           }
-          const shouldBeHost = room.players.length === 0;
           const player: Omit<Player, "last_seen"> = {
             id: playerId,
             name: data.name,
             language: null,
             ready: false,
             score: 0,
-            is_host: shouldBeHost,
+            is_host: data.isHost || playerId === room.creator_id,
             current_question: null,
           };
-          console.log(`Player ${playerId} joining room ${roomId}. Should be host: ${shouldBeHost}`);
           const success = await addPlayerToRoom(roomId, player);
           if (!success) {
-            return NextResponse.json({ error: "Failed to join room" }, { status: 500 });
+            return callback({ error: "Failed to join room", status: 500 });
           }
-          await ensureRoomHasHost(roomId);
+          socket.join(roomId);
           const updatedRoom = await getRoom(roomId);
-          console.log("Room after join:", updatedRoom);
-          return NextResponse.json({ room: updatedRoom });
+          const serverInfo = {
+            processingTime: Date.now() - socket.handshake.time,
+            roomCount: (await io.allSockets()).size,
+            timestamp: Date.now(),
+          };
+          callback({ room: updatedRoom });
+          io.to(roomId).emit("room-update", { room: updatedRoom, serverInfo });
         } catch (error) {
-          console.error("Error joining room:", error);
-          return NextResponse.json({ error: "Failed to join room" }, { status: 500 });
+          console.error(`Error joining room ${roomId}:`, error);
+          callback({ error: "Failed to join room", status: 500 });
         }
+      });
 
-      case "leave":
-        try {
-          await removePlayerFromRoom(playerId);
-          const roomAfterLeave = await getRoom(roomId);
-          if (!roomAfterLeave || roomAfterLeave.players.length === 0) {
-            await deleteRoom(roomId);
-            console.log(`Room ${roomId} deleted after leave`);
-            return NextResponse.json({ success: true });
-          }
-          await ensureRoomHasHost(roomId);
-          const updatedRoom = await getRoom(roomId);
-          console.log("Room after leave:", updatedRoom);
-          return NextResponse.json({ room: updatedRoom });
-        } catch (error) {
-          console.error("Error leaving room:", error);
-          return NextResponse.json({ error: "Failed to leave room" }, { status: 500 });
-        }
-
-      case "update-language":
-        try {
-          const currentRoom = await getRoom(roomId);
-          if (!currentRoom) {
-            return NextResponse.json({ error: "Room not found" }, { status: 404 });
-          }
-          const currentPlayer = currentRoom.players.find((p) => p.id === playerId);
-          const shouldResetReady = !currentPlayer?.language;
-          await updatePlayer(playerId, {
-            language: data.language,
-            ready: shouldResetReady ? false : currentPlayer?.ready,
-          });
-          const updatedRoom = await getRoom(roomId);
-          console.log("Room after language update:", updatedRoom);
-          return NextResponse.json({ room: updatedRoom });
-        } catch (error) {
-          console.error("Error updating language:", error);
-          return NextResponse.json({ error: "Failed to update language" }, { status: 500 });
-        }
-
-      case "toggle-ready":
-        try {
-          const currentRoom = await getRoom(roomId);
-          if (!currentRoom) {
-            return NextResponse.json({ error: "Room not found" }, { status: 404 });
-          }
-          const currentPlayer = currentRoom.players.find((p) => p.id === playerId);
-          if (currentPlayer && currentPlayer.language) {
-            await updatePlayer(playerId, { ready: !currentPlayer.ready });
-          }
-          const updatedRoom = await getRoom(roomId);
-          console.log("Room after toggle ready:", updatedRoom);
-          return NextResponse.json({ room: updatedRoom });
-        } catch (error) {
-          console.error("Error toggling ready:", error);
-          return NextResponse.json({ error: "Failed to toggle ready" }, { status: 500 });
-        }
-
-      case "start-game":
-        try {
-          const gameRoom = await getRoom(roomId);
-          if (!gameRoom) {
-            return NextResponse.json({ error: "Room not found" }, { status: 404 });
-          }
-          const host = gameRoom.players.find((p) => p.id === playerId);
-          if (!host?.is_host) {
-            return NextResponse.json({ error: "Only the host can start the game" }, { status: 403 });
-          }
-          const playersWithLanguage = gameRoom.players.filter((p) => p.language);
-          if (playersWithLanguage.length === 0) {
-            return NextResponse.json({ error: "At least one player must select a language" }, { status: 400 });
-          }
-          if (!playersWithLanguage.every((p) => p.ready)) {
-            return NextResponse.json({ error: "All players with languages must be ready" }, { status: 400 });
-          }
-          await updateRoom(roomId, {
-            game_state: "playing",
-            question_count: 0,
-          });
-          for (const player of playersWithLanguage) {
-            if (player.language) {
-              const question = generateQuestion(player.language);
-              await updatePlayer(player.id, { current_question: question });
-            }
-          }
-          const updatedRoom = await getRoom(roomId);
-          console.log("Room after start game:", updatedRoom);
-          return NextResponse.json({ room: updatedRoom });
-        } catch (error) {
-          console.error("Error starting game:", error);
-          return NextResponse.json({ error: "Failed to start game" }, { status: 500 });
-        }
-
-      case "answer":
-        try {
-          const answerRoom = await getRoom(roomId);
-          if (!answerRoom) {
-            return NextResponse.json({ error: "Room not found" }, { status: 404 });
-          }
-          const answeringPlayer = answerRoom.players.find((p) => p.id === playerId);
-          if (answeringPlayer && answeringPlayer.current_question) {
-            const { answer, timeLeft } = data;
-            const isCorrect = answer === answeringPlayer.current_question.correctAnswer;
-            if (isCorrect) {
-              const points = Math.max(1, 10 - (10 - timeLeft));
-              const newScore = answeringPlayer.score + points;
-              await updatePlayer(playerId, { score: newScore });
-              if (newScore >= answerRoom.target_score) {
-                await updateRoom(roomId, {
-                  game_state: "finished",
-                  winner_id: playerId,
-                });
-                const finalRoom = await getRoom(roomId);
-                console.log("Room after game finished:", finalRoom);
-                return NextResponse.json({ room: finalRoom });
-              }
-            }
-            if (answeringPlayer.language) {
-              const nextQuestion = generateQuestion(answeringPlayer.language);
-              await updatePlayer(playerId, { current_question: nextQuestion });
-            }
-          }
-          const updatedRoom = await getRoom(roomId);
-          console.log("Room after answer:", updatedRoom);
-          return NextResponse.json({ room: updatedRoom });
-        } catch (error) {
-          console.error("Error processing answer:", error);
-          return NextResponse.json({ error: "Failed to process answer" }, { status: 500 });
-        }
-
-      case "restart":
-        try {
-          const restartRoom = await getRoom(roomId);
-          if (!restartRoom) {
-            return NextResponse.json({ error: "Room not found" }, { status: 404 });
-          }
-          const restartHost = restartRoom.players.find((p) => p.id === playerId);
-          if (!restartHost?.is_host) {
-            return NextResponse.json({ error: "Only the host can restart the game" }, { status: 403 });
-          }
-          await updateRoom(roomId, {
-            game_state: "lobby",
-            winner_id: null,
-            question_count: 0,
-            target_score: 100,
-          });
-          for (const player of restartRoom.players) {
-            await updatePlayer(player.id, {
-              score: 0,
-              ready: false,
-              current_question: null,
-            });
-          }
-          const updatedRoom = await getRoom(roomId);
-          console.log("Room after restart:", updatedRoom);
-          return NextResponse.json({ room: updatedRoom });
-        } catch (error) {
-          console.error("Error restarting game:", error);
-          return NextResponse.json({ error: "Failed to restart game" }, { status: 500 });
-        }
-
-      case "update-target-score":
+      socket.on("update-language", async ({ roomId, playerId, data }, callback) => {
         try {
           const room = await getRoom(roomId);
           if (!room) {
-            return NextResponse.json({ error: "Room not found" }, { status: 404 });
+            return callback({ error: "Room not found", status: 404 });
           }
           const player = room.players.find((p) => p.id === playerId);
-          if (!player?.is_host) {
-            return NextResponse.json({ error: "Only the host can update the target score" }, { status: 403 });
+          if (!player) {
+            return callback({ error: "Player not found", status: 404 });
           }
-          const { targetScore } = data;
-          if (![100, 250, 500].includes(Number(targetScore))) {
-            return NextResponse.json({ error: "Invalid target score" }, { status: 400 });
+          const shouldResetReady = !player.language;
+          const success = await updatePlayer(playerId, {
+            language: data.language,
+            ready: shouldResetReady ? false : player.ready,
+          });
+          if (!success) {
+            return callback({ error: "Failed to update language", status: 500 });
           }
-          await updateRoom(roomId, { target_score: Number(targetScore) });
           const updatedRoom = await getRoom(roomId);
-          console.log(`Room ${roomId} target_score updated to ${targetScore}`);
-          return NextResponse.json({ room: updatedRoom });
+          const serverInfo = {
+            processingTime: Date.now() - socket.handshake.time,
+            roomCount: (await io.allSockets()).size,
+            timestamp: Date.now(),
+          };
+          callback({ room: updatedRoom });
+          io.to(roomId).emit("room-update", { room: updatedRoom, serverInfo });
         } catch (error) {
-          console.error("Error updating target score:", error);
-          return NextResponse.json({ error: "Failed to update target score" }, { status: 500 });
+          console.error(`Error updating language for player ${playerId}:`, error);
+          callback({ error: "Failed to update language", status: 500 });
         }
+      });
 
-      case "ping":
+      socket.on("toggle-ready", async ({ roomId, playerId }, callback) => {
         try {
-          if (playerId) {
-            await updatePlayer(playerId, {});
+          const room = await getRoom(roomId);
+          if (!room) {
+            return callback({ error: "Room not found", status: 404 });
           }
-          return NextResponse.json({ success: true });
+          const player = room.players.find((p) => p.id === playerId);
+          if (!player) {
+            return callback({ error: "Player not found", status: 404 });
+          }
+          if (!player.language) {
+            return callback({ error: "Select a language first", status: 400 });
+          }
+          const success = await updatePlayer(playerId, { ready: !player.ready });
+          if (!success) {
+            return callback({ error: "Failed to toggle ready status", status: 500 });
+          }
+          const updatedRoom = await getRoom(roomId);
+          const serverInfo = {
+            processingTime: Date.now() - socket.handshake.time,
+            roomCount: (await io.allSockets()).size,
+            timestamp: Date.now(),
+          };
+          callback({ room: updatedRoom });
+          io.to(roomId).emit("room-update", { room: updatedRoom, serverInfo });
         } catch (error) {
-          console.error("Error processing ping:", error);
-          return NextResponse.json({ error: "Failed to process ping" }, { status: 500 });
+          console.error(`Error toggling ready for player ${playerId}:`, error);
+          callback({ error: "Failed to toggle ready status", status: 500 });
         }
+      });
 
-      default:
-        return NextResponse.json({ error: "Invalid action" }, { status: 400 });
-    }
-  } catch (error) {
-    console.error("API Error:", error);
-    return NextResponse.json(
-      {
-        error: "Internal server error",
-        details: error.message,
-      },
-      { status: 500 }
-    );
-  }
-}
+      socket.on("update-target-score", async ({ roomId, playerId, data }, callback) => {
+        try {
+          const room = await getRoom(roomId);
+          if (!room) {
+            return callback({ error: "Room not found", status: 404 });
+          }
+          const player = room.players.find((p) => p.id === playerId);
+          if (!player || !player.is_host || player.id !== room.creator_id) {
+            return callback({ error: "Only the room creator can update the target score", status: 403 });
+          }
+          const targetScore = Number(data.targetScore);
+          if (![100, 250, 500].includes(targetScore)) {
+            return callback({ error: "Invalid target score", status: 400 });
+          }
+          const success = await updateRoom(roomId, { target_score: targetScore });
+          if (!success) {
+            return callback({ error: "Failed to update target score", status: 500 });
+          }
+          const updatedRoom = await getRoom(roomId);
+          const serverInfo = {
+            processingTime: Date.now() - socket.handshake.time,
+            roomCount: (await io.allSockets()).size,
+            timestamp: Date.now(),
+          };
+          callback({ room: updatedRoom });
+          io.to(roomId).emit("room-update", { room: updatedRoom, serverInfo });
+          console.log(`Room ${roomId} target_score updated to ${targetScore}`);
+        } catch (error) {
+          console.error(`Error updating target score for room ${roomId}:`, error);
+          callback({ error: "Failed to update target score", status: 500 });
+        }
+      });
 
-export async function GET(request: NextRequest) {
-  try {
-    await ensureDbInitialized();
-    const { searchParams } = new URL(request.url);
-    const roomId = searchParams.get("roomId");
-    if (!roomId) {
-      return NextResponse.json({ error: "Room ID required" }, { status: 400 });
-    }
-    const room = await getRoom(roomId);
-    if (!room) {
-      return NextResponse.json({ error: "Room not found" }, { status: 404 });
-    }
-    await ensureRoomHasHost(roomId);
-    const updatedRoom = await getRoom(roomId);
-    console.log("GET /api/rooms response:", updatedRoom);
-    return NextResponse.json({ room: updatedRoom });
-  } catch (error) {
-    console.error("GET Error:", error);
-    return NextResponse.json(
-      {
-        error: "Internal server error",
-        details: error.message,
-      },
-      { status: 500 }
-    );
+      socket.on("start-game", async ({ roomId, playerId }, callback) => {
+        try {
+          const room = await getRoom(roomId);
+          if (!room) {
+            return callback({ error: "Room not found", status: 404 });
+          }
+          const player = room.players.find((p) => p.id === playerId);
+          if (!player || !player.is_host || player.id !== room.creator_id) {
+            return callback({ error: "Only the room creator can start the game", status: 403 });
+          }
+          const playersWithLanguage = room.players.filter((p) => p.language);
+          if (playersWithLanguage.length === 0) {
+            return callback({ error: "At least one player must select a language", status: 400 });
+          }
+          if (!playersWithLanguage.every((p) => p.ready)) {
+            return callback({ error: "All players with languages must be ready", status: 400 });
+          }
+          const client = await pool.connect();
+          try {
+            await client.query("BEGIN");
+            await updateRoom(roomId, { game_state: "playing", question_count: 0 });
+            for (const p of playersWithLanguage) {
+              if (p.language) {
+                const question = generateQuestion(p.language);
+                await updatePlayer(p.id, { current_question: question });
+              }
+            }
+            await client.query("COMMIT");
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            client.release();
+          }
+          const updatedRoom = await getRoom(roomId);
+          const serverInfo = {
+            processingTime: Date.now() - socket.handshake.time,
+            roomCount: (await io.allSockets()).size,
+            timestamp: Date.now(),
+          };
+          callback({ room: updatedRoom });
+          io.to(roomId).emit("room-update", { room: updatedRoom, serverInfo });
+        } catch (error) {
+          console.error(`Error starting game for room ${roomId}:`, error);
+          callback({ error: "Failed to start game", status: 500 });
+        }
+      });
+
+      socket.on("answer", async ({ roomId, playerId, data }, callback) => {
+        try {
+          const room = await getRoom(roomId);
+          if (!room) {
+            return callback({ error: "Room not found", status: 404 });
+          }
+          const player = room.players.find((p) => p.id === playerId);
+          if (!player || !player.current_question) {
+            return callback({ error: "Player or question not found", status: 404 });
+          }
+          const client = await pool.connect();
+          try {
+            await client.query("BEGIN");
+            const { answer, timeLeft } = data;
+            const isCorrect = answer === player.current_question.correctAnswer;
+            let newScore = player.score;
+            if (isCorrect) {
+              const points = Math.max(1, Math.round(10 - (10 - timeLeft)));
+              newScore = player.score + points;
+              await updatePlayer(playerId, { score: newScore });
+              if (newScore >= room.target_score) {
+                await updateRoom(roomId, { game_state: "finished", winner_id: playerId });
+              }
+            }
+            if (player.language && room.game_state !== "finished") {
+              const nextQuestion = generateQuestion(player.language);
+              await updatePlayer(playerId, { current_question: nextQuestion });
+            }
+            await client.query("COMMIT");
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            client.release();
+          }
+          const updatedRoom = await getRoom(roomId);
+          const serverInfo = {
+            processingTime: Date.now() - socket.handshake.time,
+            roomCount: (await io.allSockets()).size,
+            timestamp: Date.now(),
+          };
+          callback({ room: updatedRoom });
+          io.to(roomId).emit("room-update", { room: updatedRoom, serverInfo });
+        } catch (error) {
+          console.error(`Error processing answer for player ${playerId}:`, error);
+          callback({ error: "Failed to process answer", status: 500 });
+        }
+      });
+
+      socket.on("restart", async ({ roomId, playerId }, callback) => {
+        try {
+          const room = await getRoom(roomId);
+          if (!room) {
+            return callback({ error: "Room not found", status: 404 });
+          }
+          const player = room.players.find((p) => p.id === playerId);
+          if (!player || !player.is_host || player.id !== room.creator_id) {
+            return callback({ error: "Only the room creator can restart the game", status: 403 });
+          }
+          const client = await pool.connect();
+          try {
+            await client.query("BEGIN");
+            await updateRoom(roomId, {
+              game_state: "lobby",
+              winner_id: null,
+              question_count: 0,
+              target_score: 100,
+            });
+            for (const p of room.players) {
+              await updatePlayer(p.id, { score: 0, ready: false, current_question: null });
+            }
+            await client.query("COMMIT");
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            client.release();
+          }
+          const updatedRoom = await getRoom(roomId);
+          const serverInfo = {
+            processingTime: Date.now() - socket.handshake.time,
+            roomCount: (await io.allSockets()).size,
+            timestamp: Date.now(),
+          };
+          callback({ room: updatedRoom });
+          io.to(roomId).emit("room-update", { room: updatedRoom, serverInfo });
+        } catch (error) {
+          console.error(`Error restarting game for room ${roomId}:`, error);
+          callback({ error: "Failed to restart game", status: 500 });
+        }
+      });
+
+      socket.on("leave-room", async ({ roomId, playerId }) => {
+        try {
+          await removePlayerFromRoom(playerId);
+          socket.leave(roomId);
+          const room = await getRoom(roomId);
+          if (!room || room.players.length === 0) {
+            await updateRoom(roomId, { creator_id: null });
+            io.to(roomId).emit("error", { message: "Room closed", status: 404 });
+            return;
+          }
+          const serverInfo = {
+            processingTime: Date.now() - socket.handshake.time,
+            roomCount: (await io.allSockets()).size,
+            timestamp: Date.now(),
+          };
+          io.to(roomId).emit("room-update", { room, serverInfo });
+        } catch (error) {
+          console.error(`Error leaving room ${roomId} for player ${playerId}:`, error);
+          io.to(roomId).emit("error", { message: "Failed to leave room", status: 500 });
+        }
+      });
+
+      socket.on("disconnect", async () => {
+        console.log("Socket.IO client disconnected:", socket.id);
+        // Optional: Clean up players who disconnect without explicitly leaving
+      });
+    });
+
+    res.socket.server.io = io;
   }
+
+  res.status(200).end();
 }
