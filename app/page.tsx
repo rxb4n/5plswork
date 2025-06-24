@@ -176,7 +176,7 @@ export default function LanguageQuizGame() {
         setCurrentPlayer(updatedCurrentPlayer);
       }
 
-      // Handle game state
+      // Handle game state transitions
       if (!room.gameState) {
         console.warn("Room gameState is undefined");
         setConnectionError("Server error: Game state not provided");
@@ -184,12 +184,19 @@ export default function LanguageQuizGame() {
         return;
       }
 
+      // Critical fix: Handle game state transition to playing
       if (room.gameState === "playing") {
+        console.log("Game state is playing, transitioning to game view");
         setGameState("playing");
-        if (waitingForNewQuestion && !currentQuestionId && updatedCurrentPlayer?.currentQuestion) {
+        setIsStartingGame(false); // Clear the starting state
+        
+        // Handle question setup for playing state
+        if (updatedCurrentPlayer?.currentQuestion) {
           const newQuestionId = updatedCurrentPlayer.currentQuestion.questionId;
+          console.log(`Player has question ${newQuestionId}, setting up game`);
+          
           if (newQuestionId !== lastProcessedQuestionId.current) {
-            console.log(`Setting initial question ${newQuestionId}`);
+            console.log(`Setting new question ${newQuestionId}`);
             setCurrentQuestion(updatedCurrentPlayer.currentQuestion);
             setCurrentQuestionId(newQuestionId);
             setTimeLeft(10);
@@ -197,8 +204,11 @@ export default function LanguageQuizGame() {
             setShowResult(false);
             setWaitingForNewQuestion(false);
             lastProcessedQuestionId.current = newQuestionId;
-            console.log("New question received:", updatedCurrentPlayer.currentQuestion);
+            console.log("New question set:", updatedCurrentPlayer.currentQuestion);
           }
+        } else {
+          console.log("Player has no current question, waiting...");
+          setWaitingForNewQuestion(true);
         }
       } else if (room.gameState === "finished" && data.room.winner_id) {
         const winnerPlayer = room.players.find((p) => p.id === data.room.winner_id);
@@ -206,11 +216,13 @@ export default function LanguageQuizGame() {
         setGameState("finished");
         setWaitingForNewQuestion(true);
       } else if (room.gameState === "lobby" && gameState !== "lobby") {
+        console.log("Game state is lobby, transitioning to lobby view");
         setGameState("lobby");
         setCurrentQuestion(null);
         setCurrentQuestionId(null);
         setWinner(null);
         setWaitingForNewQuestion(true);
+        setIsStartingGame(false);
         lastProcessedQuestionId.current = null;
       }
     });
@@ -417,6 +429,7 @@ export default function LanguageQuizGame() {
     setCurrentQuestionId(null);
     setWaitingForNewQuestion(true);
     setTargetScore(100);
+    setIsStartingGame(false);
     lastProcessedQuestionId.current = null;
   };
 
@@ -487,13 +500,14 @@ export default function LanguageQuizGame() {
 
     socket.emit("start-game", { roomId, playerId: currentPlayer.id }, (response: any) => {
       console.log("Start game response:", response);
-      setIsStartingGame(false);
+      
       if (response?.error) {
         console.error("Failed to start game:", response.error);
         setStartGameError(response.error);
+        setIsStartingGame(false);
       } else {
         console.log("Start game succeeded");
-        setGameState("playing");
+        // Don't set game state here - let the room-update handler do it
         setWaitingForNewQuestion(true);
         lastProcessedQuestionId.current = null;
       }
@@ -771,7 +785,7 @@ export default function LanguageQuizGame() {
                   variant="outline"
                 >
                   {isStartingGame
-                    ? "Starting..."
+                    ? "Starting Game..."
                     : playersWithLanguages.length === 0
                     ? "At least one player needs to select a language"
                     : !allPlayersWithLanguagesReady
