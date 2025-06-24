@@ -73,7 +73,7 @@ export default function LanguageQuizGame() {
   const [winner, setWinner] = useState<Player | null>(null);
   const [creatorId, setCreatorId] = useState<string | null>(null);
 
-  // Question and game flow state - INDIVIDUAL TIMER IMPLEMENTATION
+  // Question and game flow state - COMPLETELY ISOLATED FROM ROOM UPDATES
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
   const [timeLeft, setTimeLeft] = useState(10);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
@@ -81,12 +81,14 @@ export default function LanguageQuizGame() {
   const [isStartingGame, setIsStartingGame] = useState(false);
   const [startGameError, setStartGameError] = useState<string | null>(null);
 
-  // Refs for tracking - FIXED INDIVIDUAL TIMER IMPLEMENTATION
+  // Refs for tracking - ISOLATED TIMER IMPLEMENTATION
   const lastProcessedQuestionId = useRef<string | null>(null);
   const currentPlayerId = useRef<string | null>(null);
   const questionStartTime = useRef<number | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const isProcessingAnswer = useRef<boolean>(false);
+  const currentQuestionRef = useRef<Question | null>(null); // Track current question in ref
+  const ignoreRoomUpdates = useRef<boolean>(false); // Flag to ignore room updates during timer
 
   // Normalize server room to client expected format
   const normalizeRoom = (serverRoom: ServerRoom): {
@@ -95,24 +97,15 @@ export default function LanguageQuizGame() {
     players: Player[];
     targetScore: number;
   } => {
-    console.log("🔄 NORMALIZING ROOM DATA");
-    
-    const normalizedPlayers = serverRoom.players.map((p) => {
-      console.log(`Normalizing player ${p.name} (${p.id}):`, {
-        hasCurrentQuestion: !!p.current_question,
-        questionData: p.current_question
-      });
-      
-      return {
-        id: p.id,
-        name: p.name,
-        language: p.language,
-        ready: p.ready,
-        score: p.score,
-        isHost: p.is_host,
-        currentQuestion: p.current_question || undefined,
-      };
-    });
+    const normalizedPlayers = serverRoom.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      language: p.language,
+      ready: p.ready,
+      score: p.score,
+      isHost: p.is_host,
+      currentQuestion: p.current_question || undefined,
+    }));
 
     return {
       id: serverRoom.id,
@@ -122,9 +115,9 @@ export default function LanguageQuizGame() {
     };
   };
 
-  // FIXED: Start individual timer for current player's question
+  // FIXED: Completely isolated timer that ignores room updates
   const startIndividualTimer = (question: Question) => {
-    console.log(`⏰ Starting individual timer for question ${question.questionId}`);
+    console.log(`⏰ Starting ISOLATED timer for question ${question.questionId}`);
     
     // Clear any existing timer
     stopIndividualTimer();
@@ -133,12 +126,16 @@ export default function LanguageQuizGame() {
     setSelectedAnswer(null);
     setShowResult(false);
     isProcessingAnswer.current = false;
+    currentQuestionRef.current = question;
     
     // Set question start time
     questionStartTime.current = Date.now();
     setTimeLeft(10);
     
-    // Start countdown timer - INDIVIDUAL TO THIS PLAYER
+    // CRITICAL: Ignore room updates while timer is running
+    ignoreRoomUpdates.current = true;
+    
+    // Start countdown timer - COMPLETELY ISOLATED
     timerRef.current = setInterval(() => {
       if (!questionStartTime.current || isProcessingAnswer.current) return;
       
@@ -147,28 +144,28 @@ export default function LanguageQuizGame() {
       
       setTimeLeft(remaining);
       
-      // FIXED: Handle timeout properly
-      if (remaining <= 0 && !isProcessingAnswer.current) {
-        console.log("⏰ Individual timer expired - auto-submitting timeout!");
+      // Handle timeout
+      if (remaining <= 0 && !isProcessingAnswer.current && currentQuestionRef.current) {
+        console.log("⏰ ISOLATED timer expired - auto-submitting timeout!");
         isProcessingAnswer.current = true;
         stopIndividualTimer();
         setShowResult(true);
         setSelectedAnswer(""); // Set empty answer for timeout
         
         // Submit timeout answer immediately
-        handleTimeoutSubmission();
+        handleTimeoutSubmission(currentQuestionRef.current);
       }
     }, 100);
   };
 
-  // FIXED: Handle timeout submission separately
-  const handleTimeoutSubmission = () => {
-    if (!currentQuestion || !currentPlayer || !socket) {
+  // FIXED: Handle timeout submission with isolated question
+  const handleTimeoutSubmission = (question: Question) => {
+    if (!question || !currentPlayer || !socket) {
       console.log("❌ Cannot submit timeout - missing data");
       return;
     }
 
-    console.log(`⏰ Submitting timeout for question ${currentQuestion.questionId}`);
+    console.log(`⏰ Submitting timeout for question ${question.questionId}`);
     
     socket.emit("answer", { 
       roomId, 
@@ -176,50 +173,15 @@ export default function LanguageQuizGame() {
       data: { 
         answer: "", // Empty answer for timeout
         timeLeft: 0,
-        questionId: currentQuestion.questionId
+        questionId: question.questionId
       } 
     }, (response: any) => {
       console.log("Timeout answer response:", response);
       isProcessingAnswer.current = false;
+      ignoreRoomUpdates.current = false; // Re-enable room updates
       
       if (response?.room) {
-        const normalizedRoom = normalizeRoom(response.room);
-        const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayer.id);
-        setPlayers(normalizedRoom.players);
-        setTargetScore(normalizedRoom.targetScore);
-
-        if (updatedPlayer) {
-          setCurrentPlayer(updatedPlayer);
-        }
-
-        // Handle game end
-        if (normalizedRoom.gameState === "finished" && response.room.winner_id) {
-          const winnerPlayer = normalizedRoom.players.find((p) => p.id === response.room.winner_id);
-          setWinner(winnerPlayer || null);
-          setGameState("finished");
-          setCurrentQuestion(null);
-          lastProcessedQuestionId.current = null;
-          return;
-        }
-
-        // Handle next question after timeout
-        if (updatedPlayer?.currentQuestion) {
-          const newQuestion = updatedPlayer.currentQuestion;
-          if (newQuestion.questionId !== lastProcessedQuestionId.current) {
-            console.log(`🔄 Setting new question after timeout: ${newQuestion.questionId}`);
-            setCurrentQuestion(newQuestion);
-            lastProcessedQuestionId.current = newQuestion.questionId;
-            
-            // Start new individual timer for new question
-            setTimeout(() => {
-              startIndividualTimer(newQuestion);
-            }, 100);
-            
-            console.log("✅ New question received after timeout:", newQuestion);
-          }
-        } else {
-          console.log("❌ No new question received after timeout");
-        }
+        handleAnswerResponse(response);
       }
     });
   };
@@ -227,25 +189,28 @@ export default function LanguageQuizGame() {
   // Stop individual timer
   const stopIndividualTimer = () => {
     if (timerRef.current) {
-      console.log("⏰ Stopping individual timer");
+      console.log("⏰ Stopping ISOLATED timer");
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    ignoreRoomUpdates.current = false; // Always re-enable room updates when stopping timer
   };
 
   // FIXED: Submit answer function for manual selections
   const submitAnswer = (answer: string, actualTimeLeft?: number) => {
-    if (isProcessingAnswer.current || !currentQuestion || !currentPlayer || !socket) {
+    if (isProcessingAnswer.current || !currentQuestionRef.current || !currentPlayer || !socket) {
       console.log("❌ Cannot submit answer - already processing or missing data");
       return;
     }
+
+    const question = currentQuestionRef.current;
 
     // Calculate actual time taken using individual timer
     const timeUsed = questionStartTime.current 
       ? Math.max(0, 10 - Math.floor((Date.now() - questionStartTime.current) / 1000))
       : (actualTimeLeft !== undefined ? actualTimeLeft : timeLeft);
 
-    console.log(`🎯 Submitting manual answer for question ${currentQuestion.questionId}: "${answer}"`);
+    console.log(`🎯 Submitting manual answer for question ${question.questionId}: "${answer}"`);
     console.log(`⏰ Time left: ${timeUsed}s`);
     
     isProcessingAnswer.current = true;
@@ -259,52 +224,60 @@ export default function LanguageQuizGame() {
       data: { 
         answer, 
         timeLeft: timeUsed,
-        questionId: currentQuestion.questionId
+        questionId: question.questionId
       } 
     }, (response: any) => {
       console.log("Manual answer response:", response);
       isProcessingAnswer.current = false;
+      ignoreRoomUpdates.current = false; // Re-enable room updates
       
       if (response?.room) {
-        const normalizedRoom = normalizeRoom(response.room);
-        const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayer.id);
-        setPlayers(normalizedRoom.players);
-        setTargetScore(normalizedRoom.targetScore);
-
-        if (updatedPlayer) {
-          setCurrentPlayer(updatedPlayer);
-        }
-
-        // Handle game end
-        if (normalizedRoom.gameState === "finished" && response.room.winner_id) {
-          const winnerPlayer = normalizedRoom.players.find((p) => p.id === response.room.winner_id);
-          setWinner(winnerPlayer || null);
-          setGameState("finished");
-          setCurrentQuestion(null);
-          lastProcessedQuestionId.current = null;
-          return;
-        }
-
-        // Handle next question properly
-        if (updatedPlayer?.currentQuestion) {
-          const newQuestion = updatedPlayer.currentQuestion;
-          if (newQuestion.questionId !== lastProcessedQuestionId.current) {
-            console.log(`🔄 Setting new question after manual answer: ${newQuestion.questionId}`);
-            setCurrentQuestion(newQuestion);
-            lastProcessedQuestionId.current = newQuestion.questionId;
-            
-            // Start new individual timer for new question
-            setTimeout(() => {
-              startIndividualTimer(newQuestion);
-            }, 100);
-            
-            console.log("✅ New question received after manual answer:", newQuestion);
-          }
-        } else {
-          console.log("❌ No new question received after manual answer");
-        }
+        handleAnswerResponse(response);
       }
     });
+  };
+
+  // FIXED: Centralized answer response handler
+  const handleAnswerResponse = (response: any) => {
+    const normalizedRoom = normalizeRoom(response.room);
+    const updatedPlayer = normalizedRoom.players.find((p: Player) => p.id === currentPlayer?.id);
+    
+    setPlayers(normalizedRoom.players);
+    setTargetScore(normalizedRoom.targetScore);
+
+    if (updatedPlayer) {
+      setCurrentPlayer(updatedPlayer);
+    }
+
+    // Handle game end
+    if (normalizedRoom.gameState === "finished" && response.room.winner_id) {
+      const winnerPlayer = normalizedRoom.players.find((p) => p.id === response.room.winner_id);
+      setWinner(winnerPlayer || null);
+      setGameState("finished");
+      setCurrentQuestion(null);
+      currentQuestionRef.current = null;
+      lastProcessedQuestionId.current = null;
+      return;
+    }
+
+    // Handle next question
+    if (updatedPlayer?.currentQuestion) {
+      const newQuestion = updatedPlayer.currentQuestion;
+      if (newQuestion.questionId !== lastProcessedQuestionId.current) {
+        console.log(`🔄 Setting new question after answer: ${newQuestion.questionId}`);
+        setCurrentQuestion(newQuestion);
+        lastProcessedQuestionId.current = newQuestion.questionId;
+        
+        // Start new isolated timer for new question
+        setTimeout(() => {
+          startIndividualTimer(newQuestion);
+        }, 100);
+        
+        console.log("✅ New question received after answer:", newQuestion);
+      }
+    } else {
+      console.log("❌ No new question received after answer");
+    }
   };
 
   // Initialize Socket.IO connection
@@ -350,6 +323,12 @@ export default function LanguageQuizGame() {
     newSocket.on("room-update", (data: { room: ServerRoom; serverInfo?: ServerInfo }) => {
       console.log("=== ROOM UPDATE RECEIVED ===");
 
+      // CRITICAL: Ignore room updates if timer is running to prevent interference
+      if (ignoreRoomUpdates.current) {
+        console.log("🚫 IGNORING room update - timer is running");
+        return;
+      }
+
       if (!data.room) {
         console.error("Missing room object in room-update");
         setConnectionError("Invalid server response: Missing room data");
@@ -360,15 +339,9 @@ export default function LanguageQuizGame() {
 
       const room = normalizeRoom(data.room);
       
-      console.log("Normalized room:", {
+      console.log("Processing room update:", {
         gameState: room.gameState,
-        players: room.players.map(p => ({
-          id: p.id,
-          name: p.name,
-          language: p.language,
-          hasQuestion: !!p.currentQuestion,
-          questionId: p.currentQuestion?.questionId,
-        })),
+        playerCount: room.players.length,
         targetScore: room.targetScore,
       });
 
@@ -385,12 +358,6 @@ export default function LanguageQuizGame() {
       // Find the current player using the stored player ID
       const updatedCurrentPlayer = room.players.find((p: Player) => p.id === currentPlayerId.current);
       if (updatedCurrentPlayer) {
-        console.log("Updated current player:", {
-          id: updatedCurrentPlayer.id,
-          name: updatedCurrentPlayer.name,
-          hasQuestion: !!updatedCurrentPlayer.currentQuestion,
-          questionId: updatedCurrentPlayer.currentQuestion?.questionId,
-        });
         setCurrentPlayer(updatedCurrentPlayer);
       }
 
@@ -408,24 +375,31 @@ export default function LanguageQuizGame() {
         setGameState("playing");
         setIsStartingGame(false);
         
-        // Set question and start individual timer
+        // ONLY set question if we don't have one or it's different
         if (updatedCurrentPlayer?.currentQuestion) {
           const newQuestion = updatedCurrentPlayer.currentQuestion;
-          console.log(`🎯 SETTING QUESTION WITH INDIVIDUAL TIMER:`, {
-            questionId: newQuestion.questionId,
-            english: newQuestion.english,
-          });
           
-          setCurrentQuestion(newQuestion);
-          lastProcessedQuestionId.current = newQuestion.questionId;
-          
-          // Start individual timer for this player only
-          startIndividualTimer(newQuestion);
-          
-          console.log("✅ Question set with individual timer!");
+          // Only start timer if this is a genuinely new question
+          if (newQuestion.questionId !== lastProcessedQuestionId.current) {
+            console.log(`🎯 SETTING NEW QUESTION WITH ISOLATED TIMER:`, {
+              questionId: newQuestion.questionId,
+              english: newQuestion.english,
+            });
+            
+            setCurrentQuestion(newQuestion);
+            lastProcessedQuestionId.current = newQuestion.questionId;
+            
+            // Start isolated timer for this player only
+            startIndividualTimer(newQuestion);
+            
+            console.log("✅ Question set with isolated timer!");
+          } else {
+            console.log("🔄 Same question, keeping existing timer");
+          }
         } else {
           console.log("❌ No question found for current player");
           setCurrentQuestion(null);
+          currentQuestionRef.current = null;
           stopIndividualTimer();
         }
       } else if (room.gameState === "finished" && data.room.winner_id) {
@@ -433,37 +407,18 @@ export default function LanguageQuizGame() {
         setWinner(winnerPlayer || null);
         setGameState("finished");
         setCurrentQuestion(null);
+        currentQuestionRef.current = null;
         stopIndividualTimer();
         lastProcessedQuestionId.current = null;
       } else if (room.gameState === "lobby" && gameState !== "lobby") {
         console.log("Game state is lobby, transitioning to lobby view");
         setGameState("lobby");
         setCurrentQuestion(null);
+        currentQuestionRef.current = null;
         setWinner(null);
         setIsStartingGame(false);
         stopIndividualTimer();
         lastProcessedQuestionId.current = null;
-      }
-
-      // Handle question updates during gameplay (don't restart timer unnecessarily)
-      if (room.gameState === "playing" && updatedCurrentPlayer?.currentQuestion && gameState === "playing") {
-        const newQuestion = updatedCurrentPlayer.currentQuestion;
-        
-        // Only update if it's a different question AND we're not currently processing an answer
-        if (newQuestion.questionId !== lastProcessedQuestionId.current && !isProcessingAnswer.current) {
-          console.log(`🔄 NEW QUESTION DURING GAMEPLAY:`, {
-            questionId: newQuestion.questionId,
-            english: newQuestion.english
-          });
-          
-          setCurrentQuestion(newQuestion);
-          lastProcessedQuestionId.current = newQuestion.questionId;
-          
-          // Start new individual timer for this question
-          startIndividualTimer(newQuestion);
-          
-          console.log("✅ New question set with individual timer!");
-        }
       }
 
       console.log("=== ROOM UPDATE COMPLETE ===");
@@ -654,6 +609,7 @@ export default function LanguageQuizGame() {
     setStartGameError(null);
     setCreatorId(null);
     setCurrentQuestion(null);
+    currentQuestionRef.current = null;
     setTargetScore(100);
     setIsStartingGame(false);
     lastProcessedQuestionId.current = null;
@@ -740,9 +696,9 @@ export default function LanguageQuizGame() {
     });
   };
 
-  // FIXED: Handle answer selection with proper individual timing
+  // FIXED: Handle answer selection with isolated timing
   const selectAnswer = (answer: string) => {
-    if (isProcessingAnswer.current || selectedAnswer || !currentQuestion || !currentPlayer || !socket) {
+    if (isProcessingAnswer.current || selectedAnswer || !currentQuestionRef.current || !currentPlayer || !socket) {
       console.log("❌ Cannot select answer - already processing or missing data");
       return;
     }
@@ -758,6 +714,7 @@ export default function LanguageQuizGame() {
     stopIndividualTimer();
     socket.emit("restart", { roomId, playerId: currentPlayer.id }, () => {
       lastProcessedQuestionId.current = null;
+      currentQuestionRef.current = null;
       setTargetScore(100);
     });
   };
@@ -1019,6 +976,7 @@ export default function LanguageQuizGame() {
                   <p>Player language: {currentPlayer?.language || "None"}</p>
                   <p>Game state: {gameState}</p>
                   <p>Processing answer: {isProcessingAnswer.current ? "Yes" : "No"}</p>
+                  <p>Ignoring room updates: {ignoreRoomUpdates.current ? "Yes" : "No"}</p>
                 </div>
               </CardContent>
             </Card>
@@ -1064,7 +1022,7 @@ export default function LanguageQuizGame() {
                     Select the correct translation in {currentPlayer?.language}
                     <br />
                     <span className="text-xs text-gray-500">
-                      Individual timer • Wrong answer/timeout = -5 points
+                      🔒 Individual timer • Wrong answer/timeout = -5 points
                     </span>
                   </CardDescription>
                 </CardHeader>
