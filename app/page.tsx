@@ -108,18 +108,28 @@ export default function LanguageQuizGame() {
         body: JSON.stringify({ language }),
       });
 
+      console.log(`📡 API Response status: ${response.status}`);
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error(`❌ API Error: ${response.status} - ${errorText}`);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
 
       const data = await response.json();
-      console.log(`✅ Received question:`, data.question);
+      console.log(`✅ Received question data:`, data);
       
+      if (!data.success || !data.question) {
+        console.error(`❌ Invalid API response:`, data);
+        throw new Error('Invalid API response format');
+      }
+
       setIsLoadingQuestion(false);
       return data.question;
     } catch (error) {
       console.error(`❌ Error fetching question:`, error);
       setIsLoadingQuestion(false);
+      setConnectionError(`Failed to load question: ${error.message}`);
       return null;
     }
   };
@@ -214,17 +224,23 @@ export default function LanguageQuizGame() {
         
         // Fetch a new question when the game starts
         if (updatedCurrentPlayer?.language) {
+          console.log(`🎯 Player language detected: ${updatedCurrentPlayer.language}, fetching question...`);
           fetchNewQuestion(updatedCurrentPlayer.language).then((question) => {
             if (question) {
+              console.log(`✅ Question loaded successfully:`, question);
               setCurrentQuestion(question);
               setTimeLeft(10);
               setSelectedAnswer(null);
               setShowResult(false);
               console.log("✅ Question loaded and game started!");
             } else {
+              console.error("❌ Failed to load question");
               setConnectionError("Failed to load question");
             }
           });
+        } else {
+          console.error("❌ No language found for current player");
+          setConnectionError("No language selected");
         }
       } else if (room.gameState === "finished" && data.room.winner_id) {
         const winnerPlayer = room.players.find((p) => p.id === data.room.winner_id);
@@ -819,6 +835,9 @@ export default function LanguageQuizGame() {
               </CardHeader>
               <CardContent>
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                <div className="mt-4 text-sm text-gray-600">
+                  <p>Fetching question for {currentPlayer?.language}...</p>
+                </div>
               </CardContent>
             </Card>
           ) : !currentQuestion ? (
@@ -828,9 +847,28 @@ export default function LanguageQuizGame() {
                 <CardDescription>Unable to load question. Please try refreshing the page.</CardDescription>
               </CardHeader>
               <CardContent>
-                <Button onClick={() => window.location.reload()} variant="outline">
-                  Refresh Page
-                </Button>
+                <div className="space-y-2">
+                  <Button 
+                    onClick={() => {
+                      if (currentPlayer?.language) {
+                        fetchNewQuestion(currentPlayer.language).then((question) => {
+                          if (question) {
+                            setCurrentQuestion(question);
+                            setTimeLeft(10);
+                            setSelectedAnswer(null);
+                            setShowResult(false);
+                          }
+                        });
+                      }
+                    }} 
+                    variant="outline"
+                  >
+                    Try Again
+                  </Button>
+                  <Button onClick={() => window.location.reload()} variant="outline">
+                    Refresh Page
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ) : (
