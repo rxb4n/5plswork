@@ -200,6 +200,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: "Failed to create room" }, { status: 500 });
         }
 
+
       case "join":
         try {
           const room = await getRoom(roomId);
@@ -400,7 +401,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "Only the host can update the target score" }, { status: 403 });
           }
           const { targetScore } = data;
-          if (![100, 250].includes(targetScore)) {
+          if (![100, 250, 500].includes(Number(targetScore))) {
             return NextResponse.json({ error: "Invalid target score" }, { status: 400 });
           }
           await updateRoom(roomId, { target_score: Number(targetScore) });
