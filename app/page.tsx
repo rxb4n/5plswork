@@ -216,16 +216,19 @@ export default function LanguageQuizGame() {
         return;
       }
 
-      // Handle game state transition to playing
+      // FIXED: Handle game state transition to playing with immediate question fetch
       if (room.gameState === "playing" && gameState !== "playing") {
-        console.log("🎮 Game state changed to playing, fetching question...");
+        console.log("🎮 Game state changed to playing, fetching question immediately...");
         setGameState("playing");
         setIsStartingGame(false);
         
-        // Fetch a new question when the game starts
+        // Immediately fetch question when transitioning to playing state
         if (updatedCurrentPlayer?.language) {
-          console.log(`🎯 Player language detected: ${updatedCurrentPlayer.language}, fetching question...`);
-          fetchNewQuestion(updatedCurrentPlayer.language).then((question) => {
+          console.log(`🎯 Player language detected: ${updatedCurrentPlayer.language}, fetching question now...`);
+          
+          // Use async IIFE to handle the promise immediately
+          (async () => {
+            const question = await fetchNewQuestion(updatedCurrentPlayer.language!);
             if (question) {
               console.log(`✅ Question loaded successfully:`, question);
               setCurrentQuestion(question);
@@ -237,7 +240,7 @@ export default function LanguageQuizGame() {
               console.error("❌ Failed to load question");
               setConnectionError("Failed to load question");
             }
-          });
+          })();
         } else {
           console.error("❌ No language found for current player");
           setConnectionError("No language selected");
