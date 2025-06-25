@@ -429,34 +429,35 @@ export default function RoomPage() {
   }
 
   // FIXED: Cooperation timer with proper functionality
-  const startCooperationTimer = () => {
-    console.log("Timer started: 5")
-    setCooperationCountdown(5)
-    setCooperationTimerActive(true)
-    
-    if (cooperationTimerRef.current) {
-      clearInterval(cooperationTimerRef.current)
-    }
-    
-    cooperationTimerRef.current = setInterval(() => {
-      setCooperationCountdown(prev => {
-        const newTime = prev - 1
-        console.log(`Timer tick: ${newTime}`)
-        
-        if (newTime <= 0) {
-          console.log("Timer expired")
-          clearInterval(cooperationTimerRef.current!)
-          setCooperationTimerActive(false)
-          
-          // FIXED: Immediately handle timeout after logging
-          handleCooperationTimeout()
-          
-          return 0
-        }
-        return newTime
-      })
-    }, 1000)
+const startCooperationTimer = () => {
+  if (cooperationTimerActive) {
+    console.log("Timer already active, skipping start")
+    return
   }
+  console.log("Timer started: 5")
+  setCooperationCountdown(5)
+  setCooperationTimerActive(true)
+  
+  if (cooperationTimerRef.current) {
+    clearInterval(cooperationTimerRef.current)
+  }
+  
+  cooperationTimerRef.current = setInterval(() => {
+    setCooperationCountdown(prev => {
+      const newTime = prev - 1
+      console.log(`Timer tick: ${newTime}`)
+      
+      if (newTime <= 0) {
+        console.log("Timer expired")
+        clearInterval(cooperationTimerRef.current!)
+        setCooperationTimerActive(false)
+        handleCooperationTimeout()
+        return 0
+      }
+      return newTime
+    })
+  }, 1000)
+}
 
   const stopCooperationTimer = () => {
     if (cooperationTimerRef.current) {
