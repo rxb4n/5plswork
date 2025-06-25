@@ -232,6 +232,7 @@ export default function RoomPage() {
       console.log("📡 Room updated:", updatedRoom)
       setRoom(updatedRoom)
 
+    })
 
     newSocket.on("cooperation-challenge", ({ challenge }: { challenge: CooperationChallenge }) => {
       console.log("🤝 Cooperation challenge received:", challenge)
