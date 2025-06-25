@@ -553,7 +553,7 @@ export default function RoomPage() {
         if (room && (room.game_mode === "practice" || room.game_mode === "competition")) {
           setTimeout(() => {
             debounceLoadQuestion(room)
-          }, 500)
+          }, 0)
         }
       }, 2000)
 
