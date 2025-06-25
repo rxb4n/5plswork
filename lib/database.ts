@@ -336,7 +336,9 @@ export async function updateRoom(roomId: string, updates: Partial<Omit<Room, "pl
 export async function deleteRoom(roomId: string): Promise<boolean> {
   const client = await pool.connect();
   try {
-    await client.query("DELETE FROM rooms WHERE id = $1", [roomId]);
+    console.log(`🗑️ Deleting empty room ${roomId}`);
+    const result = await client.query("DELETE FROM rooms WHERE id = $1", [roomId]);
+    console.log(`✅ Room ${roomId} deleted successfully (${result.rowCount} rows affected)`);
     return true;
   } catch (error) {
     console.error(`Error deleting room ${roomId}:`, error);
@@ -346,7 +348,8 @@ export async function deleteRoom(roomId: string): Promise<boolean> {
   }
 }
 
-export async function removePlayerFromRoom(playerId: string): Promise<boolean> {
+// ENHANCED: Remove player and auto-cleanup empty rooms
+export async function removePlayerFromRoom(playerId: string, io?: SocketIOServer): Promise<{ roomId: string | null; wasHost: boolean; roomDeleted: boolean }> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -356,33 +359,53 @@ export async function removePlayerFromRoom(playerId: string): Promise<boolean> {
 
     if (playerResult.rows.length === 0) {
       await client.query("COMMIT");
-      return true; // Player doesn't exist, consider it successful
+      return { roomId: null, wasHost: false, roomDeleted: false }; // Player doesn't exist
     }
 
     const { room_id: roomId, is_host: wasHost } = playerResult.rows[0];
 
     // Remove the player
     await client.query("DELETE FROM players WHERE id = $1", [playerId]);
-
     console.log(`Removed player ${playerId} from room ${roomId}. Was host: ${wasHost}`);
 
-    // If the removed player was the host, ensure someone else becomes host
-    if (wasHost) {
-      await ensureRoomHasHost(roomId, client);
+    // Check if room is now empty
+    const remainingPlayersResult = await client.query("SELECT COUNT(*) as count FROM players WHERE room_id = $1", [roomId]);
+    const remainingPlayerCount = parseInt(remainingPlayersResult.rows[0].count);
+
+    console.log(`Room ${roomId} now has ${remainingPlayerCount} players remaining`);
+
+    let roomDeleted = false;
+
+    if (remainingPlayerCount === 0) {
+      // Room is empty - delete it immediately
+      console.log(`🗑️ Room ${roomId} is empty, deleting automatically...`);
+      await client.query("DELETE FROM rooms WHERE id = $1", [roomId]);
+      roomDeleted = true;
+      console.log(`✅ Empty room ${roomId} deleted successfully`);
+
+      // Notify any lingering clients that room is closed
+      if (io) {
+        io.to(roomId).emit("error", { message: "Room closed - no players remaining", status: 404 });
+      }
+    } else {
+      // Room still has players - ensure someone is host if the host left
+      if (wasHost) {
+        await ensureRoomHasHost(roomId, client);
+      }
     }
 
     await client.query("COMMIT");
-    return true;
+    return { roomId, wasHost, roomDeleted };
   } catch (error) {
     await client.query("ROLLBACK");
     console.error(`Error removing player ${playerId}:`, error);
-    return false;
+    return { roomId: null, wasHost: false, roomDeleted: false };
   } finally {
     client.release();
   }
 }
 
-// Cleanup old rooms
+// Cleanup old rooms (for scheduled cleanup)
 export async function cleanupOldRooms(io?: SocketIOServer): Promise<void> {
   const client = await pool.connect();
   try {
@@ -402,6 +425,49 @@ export async function cleanupOldRooms(io?: SocketIOServer): Promise<void> {
     console.log(`Cleaned up ${result.rowCount} old rooms`);
   } catch (error) {
     console.error("Error cleaning up rooms:", error);
+  } finally {
+    client.release();
+  }
+}
+
+// NEW: Clean up empty rooms immediately
+export async function cleanupEmptyRooms(io?: SocketIOServer): Promise<number> {
+  const client = await pool.connect();
+  try {
+    // Find rooms with no players
+    const emptyRoomsResult = await client.query(`
+      SELECT r.id 
+      FROM rooms r 
+      LEFT JOIN players p ON r.id = p.room_id 
+      WHERE p.room_id IS NULL
+    `);
+
+    if (emptyRoomsResult.rows.length === 0) {
+      return 0;
+    }
+
+    const emptyRoomIds = emptyRoomsResult.rows.map(row => row.id);
+    console.log(`🗑️ Found ${emptyRoomIds.length} empty rooms to clean up:`, emptyRoomIds);
+
+    // Delete empty rooms
+    const deleteResult = await client.query(`
+      DELETE FROM rooms 
+      WHERE id = ANY($1::varchar[])
+      RETURNING id
+    `, [emptyRoomIds]);
+
+    // Notify any lingering clients
+    if (io) {
+      deleteResult.rows.forEach((row) => {
+        io.to(row.id).emit("error", { message: "Room closed - no players remaining", status: 404 });
+      });
+    }
+
+    console.log(`✅ Cleaned up ${deleteResult.rowCount} empty rooms`);
+    return deleteResult.rowCount;
+  } catch (error) {
+    console.error("Error cleaning up empty rooms:", error);
+    return 0;
   } finally {
     client.release();
   }

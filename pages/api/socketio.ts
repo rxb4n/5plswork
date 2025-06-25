@@ -9,6 +9,7 @@ import {
   updateRoom,
   removePlayerFromRoom,
   cleanupOldRooms,
+  cleanupEmptyRooms,
   type Player,
 } from "../../lib/database"
 
@@ -55,7 +56,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Schedule periodic room cleanup (every 10 minutes)
     setInterval(async () => {
       try {
-        await cleanupOldRooms()
+        await cleanupOldRooms(io)
+        // Also clean up any empty rooms that might have been missed
+        const emptyRoomsDeleted = await cleanupEmptyRooms(io)
+        if (emptyRoomsDeleted > 0) {
+          // Broadcast available rooms update if any rooms were deleted
+          broadcastAvailableRooms(io)
+        }
       } catch (error) {
         console.error("Failed to cleanup old rooms:", error)
       }
@@ -387,54 +394,55 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // ENHANCED: Leave room handler with host detection
+      // ENHANCED: Leave room handler with automatic cleanup
       socket.on("leave-room", async ({ roomId, playerId }) => {
         try {
           console.log(`🚪 Player ${playerId} leaving room ${roomId}`)
           
-          // Get room state BEFORE removing player to check if they were host
-          const roomBeforeLeave = await getRoom(roomId)
-          const leavingPlayer = roomBeforeLeave?.players.find(p => p.id === playerId)
-          const wasHost = leavingPlayer?.is_host || false
+          // Remove player and get cleanup info
+          const { roomId: actualRoomId, wasHost, roomDeleted } = await removePlayerFromRoom(playerId, io)
           
-          console.log(`Player ${playerId} was host: ${wasHost}`)
-          
-          // Remove player from database
-          await removePlayerFromRoom(playerId)
+          if (!actualRoomId) {
+            console.log(`⚠️ Player ${playerId} was not found in any room`)
+            return
+          }
           
           // Remove from socket room
-          socket.leave(roomId)
+          socket.leave(actualRoomId)
           
-          // Get updated room state
-          const room = await getRoom(roomId)
+          if (roomDeleted) {
+            console.log(`🗑️ Room ${actualRoomId} was automatically deleted (empty)`)
+            // Broadcast available rooms update (room is now deleted)
+            broadcastAvailableRooms(io)
+            return
+          }
           
-          if (!room || room.players.length === 0) {
-            console.log(`🏠 Room ${roomId} is now empty`)
-            // Notify any remaining clients that room is closed
-            io.to(roomId).emit("error", { message: "Room closed", status: 404 })
-            
-            // Broadcast available rooms update (room is now empty)
+          // Room still exists with players
+          const room = await getRoom(actualRoomId)
+          
+          if (!room) {
+            console.log(`⚠️ Room ${actualRoomId} no longer exists after player removal`)
             broadcastAvailableRooms(io)
             return
           }
           
           // CRITICAL: If the host left, notify all remaining players to refresh
           if (wasHost) {
-            console.log(`🚨 HOST LEFT ROOM ${roomId} - Notifying all remaining players to refresh`)
-            io.to(roomId).emit("host-left")
+            console.log(`🚨 HOST LEFT ROOM ${actualRoomId} - Notifying all remaining players to refresh`)
+            io.to(actualRoomId).emit("host-left")
             // Also send error message as backup
             setTimeout(() => {
-              io.to(roomId).emit("error", { message: "Host left the room", status: 404 })
+              io.to(actualRoomId).emit("error", { message: "Host left the room", status: 404 })
             }, 500)
           } else {
             // Normal player left - just update room
-            io.to(roomId).emit("room-update", { room })
+            io.to(actualRoomId).emit("room-update", { room })
           }
           
           // Broadcast available rooms update
           broadcastAvailableRooms(io)
           
-          console.log(`✅ Player ${playerId} left room ${roomId}`)
+          console.log(`✅ Player ${playerId} left room ${actualRoomId}`)
         } catch (error) {
           console.error(`❌ Error handling leave-room for player ${playerId}:`, error)
           io.to(roomId).emit("error", { message: "Failed to leave room", status: 500 })
