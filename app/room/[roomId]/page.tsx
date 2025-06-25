@@ -544,7 +544,7 @@ export default function RoomPage() {
     
     // Reset for next question after delay
     setTimeout(() => {
-      setShowAnswerFeedback(false)
+      setAnswerFeedback(null)  // Fixed typo: was setShowAnswerFeedback(false)
       setIsAnswering(false)
       setCurrentQuestion(null)
       
@@ -1304,8 +1304,10 @@ export default function RoomPage() {
                     <div className="correct-answer-display">
                       {answerFeedback.isCorrect ? (
                         <span>✅ Correct! Well done!</span>
+                      ) : answerFeedback.selectedAnswer ? (
+                        <span>❌ Incorrect. You selected: <strong>{answerFeedback.selectedAnswer}</strong>. The correct answer was: <strong>{answerFeedback.correctAnswer}</strong></span>
                       ) : (
-                        <span>❌ Incorrect. The correct answer was: <strong>{answerFeedback.correctAnswer}</strong></span>
+                        <span>⏰ Time's up! The correct answer was: <strong>{answerFeedback.correctAnswer}</strong></span>
                       )}
                     </div>
                   )}
