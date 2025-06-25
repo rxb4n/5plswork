@@ -552,10 +552,9 @@ setTimeout(() => {
   if (room && (room.game_mode === "practice" || room.game_mode === "competition")) {
     setTimeout(() => {
       loadQuestion(room)
-    }, 500)
+    }, 0)
   }
-}, 2000) // Full 2000ms feedback display
-
+}, 1000)
 
   // Handle language selection
   const handleLanguageChange = (language: string) => {
@@ -1578,4 +1577,5 @@ setTimeout(() => {
       </div>
     </div>
   )
+}
 }
