@@ -246,12 +246,6 @@ export default function RoomPage() {
           clearTimeout(questionUpdateTimeoutRef.current)
         }
         
-        // Debounce question loading by 300ms
-        questionUpdateTimeoutRef.current = setTimeout(() => {
-          loadQuestion(updatedRoom)
-        }, 300)
-      }
-    })
 
     newSocket.on("cooperation-challenge", ({ challenge }: { challenge: CooperationChallenge }) => {
       console.log("🤝 Cooperation challenge received:", challenge)
@@ -429,35 +423,34 @@ export default function RoomPage() {
   }
 
   // FIXED: Cooperation timer with proper functionality
-const startCooperationTimer = () => {
-  if (cooperationTimerActive) {
-    console.log("Timer already active, skipping start")
-    return
+  const startCooperationTimer = () => {
+    console.log("Timer started: 5")
+    setCooperationCountdown(5)
+    setCooperationTimerActive(true)
+    
+    if (cooperationTimerRef.current) {
+      clearInterval(cooperationTimerRef.current)
+    }
+    
+    cooperationTimerRef.current = setInterval(() => {
+      setCooperationCountdown(prev => {
+        const newTime = prev - 1
+        console.log(`Timer tick: ${newTime}`)
+        
+        if (newTime <= 0) {
+          console.log("Timer expired")
+          clearInterval(cooperationTimerRef.current!)
+          setCooperationTimerActive(false)
+          
+          // FIXED: Immediately handle timeout after logging
+          handleCooperationTimeout()
+          
+          return 0
+        }
+        return newTime
+      })
+    }, 1000)
   }
-  console.log("Timer started: 5")
-  setCooperationCountdown(5)
-  setCooperationTimerActive(true)
-  
-  if (cooperationTimerRef.current) {
-    clearInterval(cooperationTimerRef.current)
-  }
-  
-  cooperationTimerRef.current = setInterval(() => {
-    setCooperationCountdown(prev => {
-      const newTime = prev - 1
-      console.log(`Timer tick: ${newTime}`)
-      
-      if (newTime <= 0) {
-        console.log("Timer expired")
-        clearInterval(cooperationTimerRef.current!)
-        setCooperationTimerActive(false)
-        handleCooperationTimeout()
-        return 0
-      }
-      return newTime
-    })
-  }, 1000)
-}
 
   const stopCooperationTimer = () => {
     if (cooperationTimerRef.current) {
@@ -543,19 +536,18 @@ const startCooperationTimer = () => {
       }
     })
     
-  // Show feedback for 2000ms, then reset and load next question
-  setTimeout(() => {
-    // Reset for next question
-    setCurrentQuestion(null)
-    setSelectedAnswer("")
-    setAnswerFeedback(null)
-    setIsAnswering(false)
-    
-    // Load next question if still playing
-    if (room?.game_state === "playing") {
-      loadQuestion(updatedRoom)
+    // Reset for next question after delay
+    setTimeout(() => {
+      setCurrentQuestion(null)
+      setSelectedAnswer("")
+      setAnswerFeedback(null)
+      setIsAnswering(false)
+      
+      // Load next question if still playing
+      if (room?.game_state === "playing") {
+        loadQuestion(room)
       }
-    }, 2000) // Changed from 0 to 2000 to show feedback for 2 seconds
+    }, 0)
   }
 
   // Handle language selection
