@@ -232,22 +232,6 @@ export default function RoomPage() {
       console.log("📡 Room updated:", updatedRoom)
       setRoom(updatedRoom)
 
-      // FIXED: Only load questions when game starts, not on every room update
-      if (updatedRoom.game_state === "playing" && 
-          (updatedRoom.game_mode === "practice" || updatedRoom.game_mode === "competition") &&
-          !currentQuestion && !isLoadingQuestion) {
-        
-        // Clear any existing timeout to prevent duplicates
-        if (questionUpdateTimeoutRef.current) {
-          clearTimeout(questionUpdateTimeoutRef.current)
-        }
-        
-        // Debounce question loading by 300ms
-        questionUpdateTimeoutRef.current = setTimeout(() => {
-          loadQuestion(updatedRoom)
-        }, 300)
-      }
-    })
 
     newSocket.on("cooperation-challenge", ({ challenge }: { challenge: CooperationChallenge }) => {
       console.log("🤝 Cooperation challenge received:", challenge)
