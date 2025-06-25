@@ -11,23 +11,7 @@ import { Progress } from "@/components/ui/progress"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { AudioSettings } from "@/components/audio-settings"
 import { useAudio } from "@/lib/audio"
-import { 
-  Users, 
-  Crown, 
-  CheckCircle, 
-  Clock, 
-  Trophy, 
-  Home, 
-  Settings,
-  Volume2,
-  RotateCcw,
-  BookOpen,
-  Zap,
-  HandHeart,
-  Heart,
-  Send,
-  Timer
-} from "lucide-react"
+import { Users, Crown, CheckCircle, Clock, Trophy, Home, Settings, Volume2, RotateCcw, BookOpen, Zap, Heart as HandHeart, Heart, Send, Timer } from "lucide-react"
 import { io, Socket } from "socket.io-client"
 
 interface Question {

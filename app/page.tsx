@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { AudioSettings } from "@/components/audio-settings"
-import { Gamepad2, Users, Settings, Volume2, BookOpen, Zap, Globe, HandHeart } from "lucide-react"
+import { Gamepad2, Users, Settings, Volume2, BookOpen, Zap, Globe, Heart as HandHeart } from "lucide-react"
 import { io, Socket } from "socket.io-client"
 
 interface AvailableRoom {
