@@ -553,7 +553,7 @@ export default function RoomPage() {
       if (room?.game_state === "playing") {
         loadQuestion(room)
       }
-    }, 3000)
+    }, 500)
   }
 
   // Handle language selection
