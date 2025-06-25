@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useParams, useSearchParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { SoundButton } from "@/components/ui/sound-button"
@@ -114,6 +114,7 @@ export default function RoomPage() {
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isLeavingRoom, setIsLeavingRoom] = useState(false)
 
   // Game state
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
@@ -129,105 +130,11 @@ export default function RoomPage() {
   const [cooperationAnswer, setCooperationAnswer] = useState("")
   const [cooperationTyping, setCooperationTyping] = useState<{ playerId: string; text: string } | null>(null)
   const [isCooperationWaiting, setIsCooperationWaiting] = useState(false)
-  const [cooperationLoading, setCooperationLoading] = useState(false)
   const [cooperationError, setCooperationError] = useState<string | null>(null)
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const activityPingRef = useRef<NodeJS.Timeout | null>(null)
-  const lastQuestionLoadRef = useRef<number>(0)
-
-  // Enhanced question loading with debouncing and error handling
-  const loadQuestion = useCallback(async (language: string, forceReload = false) => {
-    const now = Date.now()
-    
-    // Prevent duplicate calls within 1 second unless forced
-    if (!forceReload && now - lastQuestionLoadRef.current < 1000) {
-      console.log('🚫 [QUESTION] Skipping duplicate question load request')
-      return
-    }
-    
-    if (isLoadingQuestion) {
-      console.log('🚫 [QUESTION] Already loading question, skipping')
-      return
-    }
-
-    lastQuestionLoadRef.current = now
-    setIsLoadingQuestion(true)
-    setQuestionLoadingError(null)
-    
-    console.log(`🔍 [QUESTION] Loading question for language: ${language}`)
-    
-    try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 15000)
-      
-      const response = await fetch('/api/get-question', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language }),
-        signal: controller.signal
-      })
-
-      clearTimeout(timeoutId)
-      console.log(`📡 [QUESTION] API response status: ${response.status}`)
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-      }
-
-      const data = await response.json()
-      console.log(`✅ [QUESTION] Question loaded successfully:`, data)
-      
-      if (data.success && data.question) {
-        console.log(`📝 [QUESTION] Question details:`)
-        console.log(`  - ID: ${data.question.questionId}`)
-        console.log(`  - English: ${data.question.english}`)
-        console.log(`  - Correct Answer: ${data.question.correctAnswer}`)
-        console.log(`  - Options: ${data.question.options.join(', ')}`)
-        
-        setCurrentQuestion(data.question)
-        setTimeLeft(10)
-        setQuestionStartTime(Date.now())
-        
-        // Start timer
-        if (timerRef.current) {
-          clearInterval(timerRef.current)
-        }
-        
-        timerRef.current = setInterval(() => {
-          setTimeLeft(prev => {
-            if (prev <= 1) {
-              if (timerRef.current) {
-                clearInterval(timerRef.current)
-              }
-              return 0
-            }
-            return prev - 1
-          })
-        }, 1000)
-        
-        return data.question
-      } else {
-        throw new Error('Invalid question data received')
-      }
-    } catch (error: any) {
-      console.error(`❌ [QUESTION] Question loading failed:`, error)
-      
-      let errorMessage = 'Failed to load question'
-      if (error.name === 'AbortError') {
-        errorMessage = 'Question loading timed out. Please check your connection.'
-      } else if (error.message.includes('ECONNREFUSED')) {
-        errorMessage = 'Cannot connect to question service. Please try again.'
-      } else if (error.message.includes('HTTP')) {
-        errorMessage = `Server error: ${error.message}`
-      }
-      
-      setQuestionLoadingError(errorMessage)
-      return null
-    } finally {
-      setIsLoadingQuestion(false)
-    }
-  }, [isLoadingQuestion])
+  const questionTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Initialize socket connection
   useEffect(() => {
@@ -322,19 +229,6 @@ export default function RoomPage() {
     newSocket.on("room-update", ({ room: updatedRoom }: { room: Room }) => {
       console.log("📡 Room updated:", updatedRoom)
       setRoom(updatedRoom)
-      
-      // Auto-load question when game starts
-      if (updatedRoom.game_state === "playing" && !currentQuestion && !isLoadingQuestion) {
-        const currentPlayer = updatedRoom.players.find(p => p.id === playerId)
-        
-        if (updatedRoom.game_mode === "practice" && currentPlayer?.language) {
-          console.log(`🎮 [GAME-START] Auto-loading question for practice mode`)
-          loadQuestion(currentPlayer.language, true)
-        } else if (updatedRoom.game_mode === "competition" && updatedRoom.host_language) {
-          console.log(`🎮 [GAME-START] Auto-loading question for competition mode`)
-          loadQuestion(updatedRoom.host_language, true)
-        }
-      }
     })
 
     newSocket.on("cooperation-challenge", ({ challenge }: { challenge: CooperationChallenge }) => {
@@ -368,6 +262,14 @@ export default function RoomPage() {
       setTimeout(() => {
         router.push('/')
       }, 2000)
+    })
+
+    newSocket.on("room-closed", (data) => {
+      console.log("🚨 Room closed:", data)
+      setError(`Room closed: ${data.message}`)
+      setTimeout(() => {
+        router.push('/')
+      }, 3000)
     })
 
     newSocket.on("error", (errorData: any) => {
@@ -408,77 +310,112 @@ export default function RoomPage() {
       if (timerRef.current) {
         clearInterval(timerRef.current)
       }
+      if (questionTimerRef.current) {
+        clearInterval(questionTimerRef.current)
+      }
       newSocket.close()
     }
-  }, [roomId, playerId, playerName, isHost, router, currentQuestion, isLoadingQuestion, loadQuestion])
+  }, [roomId, playerId, playerName, isHost, router])
 
-  // Handle page unload
+  // Enhanced question loading with better error handling
+  const loadQuestion = async (gameMode: string, language: string) => {
+    console.log(`🔍 [QUESTION] Loading question for ${gameMode} mode in ${language}`)
+    setQuestionLoadingError(null)
+    setIsLoadingQuestion(true)
+    
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+      
+      const response = await fetch('/api/get-question', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ language }),
+        signal: controller.signal
+      })
+
+      clearTimeout(timeoutId)
+      console.log(`📡 [QUESTION] API response status: ${response.status}`)
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      console.log(`✅ [QUESTION] Question loaded successfully:`, data)
+      
+      if (data.success && data.question) {
+        setCurrentQuestion(data.question)
+        setTimeLeft(10)
+        setQuestionStartTime(Date.now())
+        
+        // Start question timer
+        if (questionTimerRef.current) {
+          clearInterval(questionTimerRef.current)
+        }
+        
+        questionTimerRef.current = setInterval(() => {
+          setTimeLeft(prev => {
+            if (prev <= 1) {
+              if (questionTimerRef.current) {
+                clearInterval(questionTimerRef.current)
+              }
+              return 0
+            }
+            return prev - 1
+          })
+        }, 1000)
+        
+        return data.question
+      } else {
+        throw new Error('Invalid question data received')
+      }
+    } catch (error) {
+      console.error(`❌ [QUESTION] Loading failed:`, error)
+      if (error.name === 'AbortError') {
+        setQuestionLoadingError('Question loading timed out. Please check your connection.')
+      } else {
+        setQuestionLoadingError(`Failed to load question: ${error.message}`)
+      }
+      return null
+    } finally {
+      setIsLoadingQuestion(false)
+    }
+  }
+
+  // Handle page unload with improved cleanup
   useEffect(() => {
-    const handleBeforeUnload = () => {
-      if (socket && playerId) {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (socket && playerId && !isLeavingRoom) {
+        // Use sendBeacon for reliable cleanup
+        const data = JSON.stringify({ roomId, playerId, reason: 'page_unload' })
+        navigator.sendBeacon('/api/leave-room', data)
+        
+        // Also try socket cleanup
         socket.emit("leave-room", { roomId, playerId })
       }
     }
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && socket && playerId && !isLeavingRoom) {
+        // Page is being hidden, attempt cleanup
+        const data = JSON.stringify({ roomId, playerId, reason: 'visibility_change' })
+        navigator.sendBeacon('/api/leave-room', data)
+      }
+    }
+
     window.addEventListener('beforeunload', handleBeforeUnload)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [socket, roomId, playerId])
+  }, [socket, roomId, playerId, isLeavingRoom])
 
   // Get current player
   const currentPlayer = room?.players.find(p => p.id === playerId)
   const isCurrentPlayerHost = currentPlayer?.is_host || false
-
-  // Handle answer submission with enhanced feedback
-  const handleAnswer = useCallback(async (answer: string, timeLeft: number, correctAnswer: string) => {
-    if (!socket || !room || isAnswering) return
-
-    setIsAnswering(true)
-    console.log(`📝 [ANSWER] Submitting answer: "${answer}" (correct: ${answer === correctAnswer})`)
-
-    const isCorrect = answer === correctAnswer
-    const isTimeout = timeLeft <= 0 || answer === ""
-    const isPracticeMode = room.game_mode === "practice"
-
-    try {
-      socket.emit("answer", {
-        roomId,
-        playerId,
-        data: {
-          answer,
-          timeLeft,
-          correctAnswer,
-          isPracticeMode,
-          isCorrect,
-          isTimeout
-        }
-      }, (response: any) => {
-        if (response.error) {
-          console.error("❌ Failed to submit answer:", response.error)
-          setError(response.error)
-        } else {
-          console.log("✅ Answer submitted successfully")
-          
-          // Load next question after a short delay
-          setTimeout(() => {
-            const language = room.game_mode === "practice" 
-              ? currentPlayer?.language 
-              : room.host_language
-            
-            if (language && response.room?.game_state === "playing") {
-              loadQuestion(language, true)
-            }
-          }, 2000)
-        }
-        setIsAnswering(false)
-      })
-    } catch (error) {
-      console.error("❌ Error submitting answer:", error)
-      setError("Failed to submit answer")
-      setIsAnswering(false)
-    }
-  }, [socket, room, playerId, roomId, isAnswering, currentPlayer, loadQuestion])
 
   // Handle language selection
   const handleLanguageChange = (language: string) => {
@@ -573,23 +510,24 @@ export default function RoomPage() {
   }
 
   // Enhanced cooperation mode start with proper error handling
-  const startCooperationMode = useCallback(async () => {
-    if (!room || !currentPlayer?.language) return
+  const startCooperationMode = async () => {
+    if (!room || !currentPlayer?.language) {
+      setCooperationError("Language must be selected before starting cooperation mode")
+      return
+    }
 
-    setCooperationLoading(true)
     setCooperationError(null)
+    setIsCooperationWaiting(true)
 
     try {
       console.log(`🤝 [COOPERATION] Starting cooperation mode for room ${roomId}`)
       
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 15000)
-
+      const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
+      
       const response = await fetch('/api/cooperation/start', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           roomId,
           language: currentPlayer.language,
@@ -599,43 +537,48 @@ export default function RoomPage() {
       })
 
       clearTimeout(timeoutId)
-
+      
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.message || `HTTP ${response.status}: Failed to start cooperation mode`)
+        const errorData = await response.json().catch(() => ({ message: 'Unknown error' }))
+        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`)
       }
 
       const data = await response.json()
       console.log(`✅ [COOPERATION] Started successfully:`, data)
-
+      
       if (data.success && data.session) {
-        // Handle successful cooperation start
-        console.log(`🎯 [COOPERATION] Session created:`, data.session)
+        // Cooperation mode started successfully
+        setIsCooperationWaiting(false)
+      } else {
+        throw new Error(data.message || 'Failed to start cooperation mode')
       }
-
-    } catch (error: any) {
-      console.error('❌ [COOPERATION] Error starting cooperation mode:', error)
       
-      let errorMessage = 'Failed to start cooperation mode'
+    } catch (error) {
+      console.error(`❌ [COOPERATION] Start failed:`, error)
+      setIsCooperationWaiting(false)
+      
       if (error.name === 'AbortError') {
-        errorMessage = 'Request timed out. Please check your connection.'
+        setCooperationError("Request timed out. Please check your connection and try again.")
       } else if (error.message.includes('ECONNREFUSED')) {
-        errorMessage = 'Cannot connect to cooperation service. Please try again.'
-      } else if (error.message.includes('HTTP')) {
-        errorMessage = error.message
+        setCooperationError("Cannot connect to cooperation service. Please try again in a moment.")
+      } else if (error.message.includes('400')) {
+        setCooperationError("Invalid request. Please check your settings and try again.")
+      } else {
+        setCooperationError(`Failed to start cooperation mode: ${error.message}`)
       }
-      
-      setCooperationError(errorMessage)
-    } finally {
-      setCooperationLoading(false)
     }
-  }, [room, currentPlayer, roomId])
+  }
 
-  // Handle game start
-  const handleStartGame = () => {
+  // Handle game start with cooperation mode support
+  const handleStartGame = async () => {
     if (!socket || !isCurrentPlayerHost) return
 
     console.log(`🎮 [DEBUG] Starting game in ${room?.game_mode} mode`)
+    
+    // Special handling for cooperation mode
+    if (room?.game_mode === "cooperation") {
+      await startCooperationMode()
+    }
     
     socket.emit("start-game", { roomId, playerId }, (response: any) => {
       if (response.error) {
@@ -644,9 +587,57 @@ export default function RoomPage() {
       } else {
         console.log(`✅ [DEBUG] Game started successfully`)
         
-        // Start cooperation mode if needed
-        if (room?.game_mode === "cooperation") {
-          startCooperationMode()
+        // Load initial question for practice/competition modes
+        if (room?.game_mode === "practice" || room?.game_mode === "competition") {
+          const language = room.game_mode === "practice" 
+            ? currentPlayer?.language 
+            : room.host_language
+          
+          if (language) {
+            console.log(`🔍 [DEBUG] Loading initial question for ${room.game_mode} mode`)
+            loadQuestion(room.game_mode, language)
+          }
+        }
+      }
+    })
+  }
+
+  // Handle answer submission
+  const handleAnswerSubmit = (answer: string, timeLeft: number, correctAnswer: string) => {
+    if (!socket || !room || !currentPlayer) return
+
+    console.log(`📝 [ANSWER] Submitting answer: "${answer}" with ${timeLeft}s remaining`)
+
+    const isCorrect = answer === correctAnswer
+    const isPracticeMode = room.game_mode === "practice"
+
+    socket.emit("answer", {
+      roomId,
+      playerId,
+      data: {
+        answer,
+        timeLeft,
+        correctAnswer,
+        isPracticeMode
+      }
+    }, (response: any) => {
+      if (response.error) {
+        console.error("❌ Failed to submit answer:", response.error)
+        setError(response.error)
+      } else {
+        console.log(`✅ [ANSWER] Answer processed successfully`)
+        
+        // Load next question if game is still playing
+        if (response.room?.game_state === "playing") {
+          const language = room.game_mode === "practice" 
+            ? currentPlayer.language 
+            : room.host_language
+          
+          if (language) {
+            setTimeout(() => {
+              loadQuestion(room.game_mode!, language)
+            }, 2000) // 2 second delay for feedback
+          }
         }
       }
     })
@@ -664,35 +655,62 @@ export default function RoomPage() {
         // Reset local state
         setCurrentQuestion(null)
         setCooperationChallenge(null)
-        setCooperationAnswer("")
         setCooperationError(null)
         setQuestionLoadingError(null)
-        if (timerRef.current) {
-          clearInterval(timerRef.current)
+        if (questionTimerRef.current) {
+          clearInterval(questionTimerRef.current)
         }
       }
     })
   }
 
-  // Handle leave room
-  const handleLeaveRoom = () => {
-    if (socket) {
-      socket.emit("leave-room", { roomId, playerId })
+  // Enhanced leave room with proper cleanup
+  const handleLeaveRoom = async () => {
+    if (isLeavingRoom) return // Prevent double-clicking
+    
+    setIsLeavingRoom(true)
+    console.log(`🚪 [LEAVE] Player ${playerId} leaving room ${roomId}`)
+
+    try {
+      // Clean up timers
+      if (questionTimerRef.current) {
+        clearInterval(questionTimerRef.current)
+      }
+      if (activityPingRef.current) {
+        clearInterval(activityPingRef.current)
+      }
+
+      // Try socket cleanup first
+      if (socket && socket.connected) {
+        socket.emit("leave-room", { roomId, playerId })
+        await new Promise(resolve => setTimeout(resolve, 500)) // Give socket time to process
+      }
+
+      // Also try API cleanup as backup
+      try {
+        await fetch('/api/leave-room', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomId, playerId, reason: 'manual_leave' })
+        })
+      } catch (apiError) {
+        console.warn("API leave-room failed:", apiError)
+        // Don't block navigation for API failures
+      }
+
+    } catch (error) {
+      console.error("Error during leave room:", error)
+    } finally {
+      // Always navigate away
+      router.push('/')
     }
-    router.push('/')
   }
 
-  // Handle cooperation answer submission with enhanced error handling
+  // Handle cooperation answer submission
   const handleCooperationSubmit = async () => {
     if (!cooperationChallenge || !cooperationAnswer.trim()) return
 
-    setCooperationLoading(true)
-    setCooperationError(null)
-
     try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 15000)
-
       const response = await fetch('/api/validate-cooperation-answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -701,15 +719,8 @@ export default function RoomPage() {
           answer: cooperationAnswer.trim(),
           language: cooperationChallenge.language,
           usedWords: room?.used_words || []
-        }),
-        signal: controller.signal
+        })
       })
-
-      clearTimeout(timeoutId)
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: Failed to validate answer`)
-      }
 
       const result = await response.json()
 
@@ -732,20 +743,10 @@ export default function RoomPage() {
         setCooperationError(result.message)
         setTimeout(() => setCooperationError(null), 3000)
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error("❌ Error validating cooperation answer:", error)
-      
-      let errorMessage = 'Failed to validate answer'
-      if (error.name === 'AbortError') {
-        errorMessage = 'Request timed out. Please check your connection.'
-      } else if (error.message.includes('ECONNREFUSED')) {
-        errorMessage = 'Cannot connect to validation service. Please try again.'
-      }
-      
-      setCooperationError(errorMessage)
+      setCooperationError("Failed to validate answer")
       setTimeout(() => setCooperationError(null), 3000)
-    } finally {
-      setCooperationLoading(false)
     }
   }
 
@@ -847,21 +848,12 @@ export default function RoomPage() {
               onClick={handleLeaveRoom}
               variant="outline"
               className="mobile-btn-sm"
+              disabled={isLeavingRoom}
             >
-              <LogOut className="h-4 w-4" />
+              {isLeavingRoom ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
             </SoundButton>
           </div>
         </div>
-
-        {/* Leaderboard - Fixed position during gameplay */}
-        {room.players && room.players.length > 0 && (
-          <Leaderboard 
-            players={room.players}
-            currentPlayerId={playerId || ''}
-            gameState={room.game_state}
-            targetScore={room.target_score}
-          />
-        )}
 
         {/* Error Display */}
         {error && (
@@ -869,7 +861,7 @@ export default function RoomPage() {
             <CardContent className="p-4">
               <div className="flex items-center gap-2">
                 <AlertCircle className="h-4 w-4 text-red-600" />
-                <p className="text-red-700 text-center">{error}</p>
+                <p className="text-red-700">{error}</p>
               </div>
             </CardContent>
           </Card>
@@ -881,7 +873,7 @@ export default function RoomPage() {
             <CardContent className="p-4">
               <div className="flex items-center gap-2">
                 <AlertCircle className="h-4 w-4 text-orange-600" />
-                <p className="text-orange-700 text-center">⚠️ {questionLoadingError}</p>
+                <p className="text-orange-700">⚠️ {questionLoadingError}</p>
               </div>
             </CardContent>
           </Card>
@@ -893,10 +885,20 @@ export default function RoomPage() {
             <CardContent className="p-4">
               <div className="flex items-center gap-2">
                 <AlertCircle className="h-4 w-4 text-red-600" />
-                <p className="text-red-700 text-center">{cooperationError}</p>
+                <p className="text-red-700">🤝 {cooperationError}</p>
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {/* Leaderboard - Only show in practice/competition modes during gameplay */}
+        {room.game_state === "playing" && room.game_mode !== "cooperation" && (
+          <Leaderboard
+            players={room.players}
+            currentPlayerId={playerId!}
+            gameState={room.game_state}
+            targetScore={room.target_score}
+          />
         )}
 
         {/* Game Content */}
@@ -1163,19 +1165,9 @@ export default function RoomPage() {
                       <SoundButton
                         onClick={handleStartGame}
                         className="mobile-btn-lg px-8 bg-green-600 hover:bg-green-700 text-white"
-                        disabled={cooperationLoading}
                       >
-                        {cooperationLoading ? (
-                          <>
-                            <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                            Starting...
-                          </>
-                        ) : (
-                          <>
-                            <Play className="h-5 w-5 mr-2" />
-                            Start Game
-                          </>
-                        )}
+                        <Play className="h-5 w-5 mr-2" />
+                        Start Game
                       </SoundButton>
                     </div>
                   )}
@@ -1259,7 +1251,6 @@ export default function RoomPage() {
         {/* Practice/Competition Mode Gameplay */}
         {room.game_state === "playing" && (room.game_mode === "practice" || room.game_mode === "competition") && (
           <div className="mobile-spacing-md">
-            {/* Question Display */}
             {isLoadingQuestion ? (
               <Card className="mobile-card">
                 <CardContent className="flex flex-col items-center justify-center p-8">
@@ -1272,7 +1263,7 @@ export default function RoomPage() {
               <QuestionDisplay
                 question={currentQuestion}
                 timeLeft={timeLeft}
-                onAnswer={handleAnswer}
+                onAnswer={handleAnswerSubmit}
                 disabled={isAnswering}
                 gameMode={room.game_mode}
               />
@@ -1283,8 +1274,8 @@ export default function RoomPage() {
                   <h3 className="mobile-text-lg font-semibold mb-2">Waiting for Question</h3>
                   <p className="text-gray-600 text-center">Your next question will appear here.</p>
                   {questionLoadingError && (
-                    <div className="mt-4 p-3 bg-red-50 rounded-lg border border-red-200 w-full">
-                      <p className="text-red-700 text-center text-sm">{questionLoadingError}</p>
+                    <div className="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
+                      <p className="text-red-700 text-sm text-center">{questionLoadingError}</p>
                     </div>
                   )}
                 </CardContent>
@@ -1350,23 +1341,18 @@ export default function RoomPage() {
                           onChange={(e) => handleCooperationTyping(e.target.value)}
                           placeholder={`Type a ${cooperationChallenge.englishName.toLowerCase()} word...`}
                           className="flex-1"
-                          disabled={cooperationLoading}
                           onKeyPress={(e) => {
-                            if (e.key === 'Enter' && !cooperationLoading) {
+                            if (e.key === 'Enter') {
                               handleCooperationSubmit()
                             }
                           }}
                         />
                         <SoundButton
                           onClick={handleCooperationSubmit}
-                          disabled={!cooperationAnswer.trim() || cooperationLoading}
+                          disabled={!cooperationAnswer.trim()}
                           className="mobile-btn-md"
                         >
-                          {cooperationLoading ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            "Submit"
-                          )}
+                          Submit
                         </SoundButton>
                       </div>
                       <p className="mobile-text-sm text-gray-600">
@@ -1395,12 +1381,6 @@ export default function RoomPage() {
                   <Timer className="h-12 w-12 text-gray-400 mb-4" />
                   <h3 className="mobile-text-lg font-semibold mb-2">Waiting for Challenge</h3>
                   <p className="text-gray-600 text-center">The next cooperation challenge will appear here.</p>
-                  {cooperationLoading && (
-                    <div className="mt-4 flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin text-purple-600" />
-                      <span className="text-purple-600 text-sm">Setting up challenge...</span>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
             )}

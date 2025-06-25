@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from "next"
 import { CATEGORIES, getCategoryInfo } from "../../../lib/word-database"
 
-// API endpoint for starting cooperation mode with category validation
+// API endpoint for starting cooperation mode with enhanced validation and error handling
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ 
@@ -47,36 +47,32 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     let categoriesToUse = CATEGORIES.map(cat => cat.id) // Default to all categories
     
     if (selectedCategories && Array.isArray(selectedCategories)) {
-      // Validate that all selected categories exist
-      const invalidCategories = selectedCategories.filter(catId => 
-        !CATEGORIES.find(cat => cat.id === catId)
+      // Filter out any invalid categories
+      const validCategories = selectedCategories.filter(catId => 
+        CATEGORIES.find(cat => cat.id === catId)
       )
       
-      if (invalidCategories.length > 0) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid categories',
-          message: `Invalid categories: ${invalidCategories.join(', ')}. Available categories: ${CATEGORIES.map(c => c.id).join(', ')}`,
-          invalidCategories,
-          availableCategories: CATEGORIES.map(cat => ({ id: cat.id, name: cat.name }))
-        })
+      if (validCategories.length === 0) {
+        console.log(`⚠️ [COOPERATION] No valid categories provided, using all categories`)
+        categoriesToUse = CATEGORIES.map(cat => cat.id)
+      } else {
+        categoriesToUse = validCategories
+        console.log(`✅ [COOPERATION] Using ${validCategories.length} valid categories`)
       }
-      
-      if (selectedCategories.length === 0) {
-        return res.status(400).json({
-          success: false,
-          error: 'No categories selected',
-          message: 'At least one category must be selected for cooperation mode'
-        })
-      }
-      
-      categoriesToUse = selectedCategories
     }
 
     // Get a random category from the validated list
-    const randomCategory = CATEGORIES.find(cat => 
-      categoriesToUse.includes(cat.id)
-    ) || CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)]
+    const randomCategoryIndex = Math.floor(Math.random() * categoriesToUse.length)
+    const randomCategoryId = categoriesToUse[randomCategoryIndex]
+    const randomCategory = CATEGORIES.find(cat => cat.id === randomCategoryId)
+
+    if (!randomCategory) {
+      return res.status(500).json({
+        success: false,
+        error: 'Category selection failed',
+        message: 'Failed to select a valid category for cooperation mode'
+      })
+    }
 
     // Language-specific category names
     const categoryTranslations = {
@@ -160,7 +156,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     res.status(500).json({ 
       success: false,
       error: 'Internal server error',
-      message: 'Failed to start cooperation mode',
+      message: 'Failed to start cooperation mode due to server error',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     })
   }

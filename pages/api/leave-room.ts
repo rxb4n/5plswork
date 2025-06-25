@@ -2,7 +2,7 @@ import { NextApiRequest, NextApiResponse } from "next"
 import { removePlayerFromRoom } from "../../lib/database"
 
 // API endpoint for removing players from rooms
-// This is specifically designed to handle beforeunload scenarios
+// This handles both manual leaves and automatic cleanup scenarios
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // Only allow POST requests
   if (req.method !== 'POST') {
@@ -16,20 +16,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const { roomId, playerId, reason = 'api_call' } = req.body
 
     // Validate required parameters
-    if (!roomId || !playerId) {
+    if (!playerId) {
       return res.status(400).json({
         error: 'Missing required parameters',
-        message: 'Both roomId and playerId are required'
+        message: 'playerId is required'
       })
     }
 
-    console.log(`🚪 API: Removing player ${playerId} from room ${roomId} (reason: ${reason})`)
+    console.log(`🚪 [API] Removing player ${playerId} from room ${roomId || 'unknown'} (reason: ${reason})`)
 
     // Remove player from room using database function
     const result = await removePlayerFromRoom(playerId)
 
     if (result.roomId) {
-      console.log(`✅ API: Successfully removed player ${playerId} from room ${result.roomId}`)
+      console.log(`✅ [API] Successfully removed player ${playerId} from room ${result.roomId}`)
+      console.log(`📊 [API] Room status: wasHost=${result.wasHost}, roomDeleted=${result.roomDeleted}`)
       
       return res.status(200).json({
         success: true,
@@ -41,17 +42,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
     } else {
-      console.log(`⚠️ API: Player ${playerId} was not found in any room`)
+      console.log(`⚠️ [API] Player ${playerId} was not found in any room`)
       
-      return res.status(404).json({
-        success: false,
-        error: 'Player not found',
-        message: 'Player was not found in any room'
+      return res.status(200).json({
+        success: true,
+        message: 'Player was not in any room',
+        data: {
+          roomId: null,
+          wasHost: false,
+          roomDeleted: false
+        }
       })
     }
 
   } catch (error) {
-    console.error(`❌ API: Error removing player from room:`, error)
+    console.error(`❌ [API] Error removing player from room:`, error)
     
     return res.status(500).json({
       success: false,

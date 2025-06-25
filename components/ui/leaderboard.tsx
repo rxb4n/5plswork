@@ -71,8 +71,8 @@ export function Leaderboard({ players, currentPlayerId, gameState, targetScore }
     return a.name.localeCompare(b.name)
   })
 
-  // Don't show leaderboard in lobby state
-  if (gameState === 'lobby') {
+  // Don't show leaderboard in lobby state or if no players
+  if (gameState === 'lobby' || players.length === 0) {
     return null
   }
 
@@ -118,7 +118,7 @@ export function Leaderboard({ players, currentPlayerId, gameState, targetScore }
       </div>
 
       {/* Players List */}
-      <div className="space-y-2">
+      <div className="space-y-2 max-h-64 overflow-y-auto">
         {sortedPlayers.map((player, index) => {
           const isCurrentPlayer = player.id === currentPlayerId
           const scoreChangeClass = getScoreChangeClass(player.id)
