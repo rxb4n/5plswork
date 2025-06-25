@@ -968,7 +968,7 @@ export default function RoomPage() {
 
                   {showFeedback && (
                     <div className="text-center">
-                      {isCorreectAnswer ? (
+                      {isCorrectAnswer ? (
                         <div className="flex items-center justify-center gap-2 text-green-600">
                           <CheckCircle className="h-6 w-6" />
                           <span className="text-xl font-bold">Correct! 🎉</span>
