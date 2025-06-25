@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import React from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useParams, useSearchParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { SoundButton } from "@/components/ui/sound-button"
@@ -137,6 +138,17 @@ export default function RoomPage() {
   const activityPingRef = useRef<NodeJS.Timeout | null>(null)
   const questionUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const cooperationTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const loadQuestionTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Debounce function for loadQuestion
+  const debounceLoadQuestion = useCallback((gameRoom: Room) => {
+    if (loadQuestionTimeoutRef.current) {
+      clearTimeout(loadQuestionTimeoutRef.current)
+    }
+    loadQuestionTimeoutRef.current = setTimeout(() => {
+      loadQuestion(gameRoom)
+    }, 100)
+  }, [])
 
   // Initialize socket connection
   useEffect(() => {
@@ -165,7 +177,6 @@ export default function RoomPage() {
       setConnectionStatus('connected')
       setError(null)
       
-      // Join or create room with proper error handling
       if (isHost) {
         console.log(`🏠 Creating room ${roomId} as host`)
         newSocket.emit("create-room", { 
@@ -181,8 +192,6 @@ export default function RoomPage() {
           } else {
             console.log("✅ Room created successfully:", response.room)
             setRoom(response.room)
-            
-            // Now add the host player to the room
             newSocket.emit("join-room", { 
               roomId, 
               playerId, 
@@ -229,29 +238,36 @@ export default function RoomPage() {
     })
 
     newSocket.on("room-update", ({ room: updatedRoom }: { room: Room }) => {
-      console.log("📡 Room updated:", updatedRoom)
+      console.log(`[DEBUG] room-update at ${new Date().toISOString()}`, updatedRoom)
       setRoom(updatedRoom)
-
     })
 
     newSocket.on("cooperation-challenge", ({ challenge }: { challenge: CooperationChallenge }) => {
+      if (!room) {
+        console.warn("[DEBUG] Room state not ready, skipping challenge")
+        return
+      }
+      if (!challenge || !challenge.challengeId || !challenge.language) {
+        console.error("[DEBUG] Invalid cooperation challenge received:", challenge)
+        setError("Invalid challenge received")
+        return
+      }
       console.log("🤝 Cooperation challenge received:", challenge)
       setCooperationChallenge(challenge)
       setIsCooperationWaiting(false)
       setCooperationAnswer("")
       setCooperationTyping(null)
       
-      // FIXED: Start timer immediately when challenge is received
-      if (challenge && room?.current_challenge_player === playerId) {
-        console.log("🕐 Starting cooperation timer for current player")
+      if (challenge && room.current_challenge_player === playerId) {
+        console.log("[DEBUG] Starting cooperation timer for current player", playerId)
         startCooperationTimer()
       }
     })
 
     newSocket.on("cooperation-waiting", ({ isWaiting }: { isWaiting: boolean }) => {
-      console.log("⏳ Cooperation waiting state:", isWaiting)
+      console.log("[DEBUG] Cooperation waiting state:", isWaiting)
       setIsCooperationWaiting(isWaiting)
-      if (isWaiting) {
+      if (isWaiting && room?.current_challenge_player !== playerId) {
         setCooperationChallenge(null)
         setCooperationAnswer("")
         setCooperationTyping(null)
@@ -292,31 +308,28 @@ export default function RoomPage() {
       console.log("🔄 Reconnected after", attemptNumber, "attempts")
       setConnectionStatus('connected')
       setError(null)
+      newSocket.emit("join-room", { 
+        roomId, 
+        playerId, 
+        data: { name: decodeURIComponent(playerName), isHost } 
+      })
     })
 
     setSocket(newSocket)
 
-    // Set up activity ping
     activityPingRef.current = setInterval(() => {
       if (newSocket.connected) {
         newSocket.emit("room-activity-ping", { roomId, playerId })
       }
-    }, 30000) // Ping every 30 seconds
+    }, 30000)
 
     return () => {
       console.log("🔌 Cleaning up socket connection...")
-      if (activityPingRef.current) {
-        clearInterval(activityPingRef.current)
-      }
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-      }
-      if (questionUpdateTimeoutRef.current) {
-        clearTimeout(questionUpdateTimeoutRef.current)
-      }
-      if (cooperationTimerRef.current) {
-        clearInterval(cooperationTimerRef.current)
-      }
+      if (activityPingRef.current) clearInterval(activityPingRef.current)
+      if (timerRef.current) clearInterval(timerRef.current)
+      if (questionUpdateTimeoutRef.current) clearTimeout(questionUpdateTimeoutRef.current)
+      if (cooperationTimerRef.current) clearInterval(cooperationTimerRef.current)
+      if (loadQuestionTimeoutRef.current) clearTimeout(loadQuestionTimeoutRef.current)
       newSocket.close()
     }
   }, [roomId, playerId, playerName, isHost, router])
@@ -335,9 +348,28 @@ export default function RoomPage() {
     }
   }, [socket, roomId, playerId])
 
+  // Load initial question when game starts
+  useEffect(() => {
+    if (
+      room?.game_state === "playing" &&
+      (room.game_mode === "practice" || room.game_mode === "competition") &&
+      !currentQuestion &&
+      !isLoadingQuestion &&
+      !isAnswering &&
+      !showAnswerFeedback
+    ) {
+      console.log("[DEBUG] Loading initial question on game start")
+      debounceLoadQuestion(room)
+    }
+  }, [room?.game_state, room?.game_mode, currentQuestion, isLoadingQuestion, isAnswering, showAnswerFeedback, debounceLoadQuestion])
+
   // Load question function
   const loadQuestion = async (gameRoom: Room) => {
-    if (isLoadingQuestion) return
+    console.log(`[DEBUG] loadQuestion called at ${new Date().toISOString()} for mode ${gameRoom.game_mode}, isAnswering=${isAnswering}, showAnswerFeedback=${showAnswerFeedback}`)
+    if (isLoadingQuestion || isAnswering || showAnswerFeedback) {
+      console.log("[DEBUG] loadQuestion blocked")
+      return
+    }
     
     setIsLoadingQuestion(true)
     setQuestionLoadingError(null)
@@ -383,16 +415,13 @@ export default function RoomPage() {
         setShowAnswerFeedback(false)
         setLastAnswerCorrect(null)
         
-        // Start timer
-        if (timerRef.current) {
-          clearInterval(timerRef.current)
-        }
+        if (timerRef.current) clearInterval(timerRef.current)
         
         timerRef.current = setInterval(() => {
           setTimeLeft(prev => {
             if (prev <= 1) {
               clearInterval(timerRef.current!)
-              handleAnswer("", true) // Handle timeout
+              handleAnswer("", true)
               return 0
             }
             return prev - 1
@@ -409,30 +438,27 @@ export default function RoomPage() {
     }
   }
 
-  // FIXED: Cooperation timer functions
+  // Cooperation timer functions
   const startCooperationTimer = () => {
-    console.log("Timer started: 5")
+    console.log(`[DEBUG] Starting timer at ${new Date().toISOString()}: 5`)
     setCooperationCountdown(5)
     setCooperationTimerActive(true)
     
-    // Clear any existing timer
     if (cooperationTimerRef.current) {
+      console.log("[DEBUG] Clearing existing timer")
       clearInterval(cooperationTimerRef.current)
     }
     
     cooperationTimerRef.current = setInterval(() => {
       setCooperationCountdown(prev => {
         const newTime = prev - 1
-        console.log(`Timer tick: ${newTime}`)
+        console.log(`[DEBUG] Timer tick at ${new Date().toISOString()}: ${newTime}`)
         
         if (newTime <= 0) {
-          console.log("Timer expired")
+          console.log("[DEBUG] Timer expired")
           clearInterval(cooperationTimerRef.current!)
           setCooperationTimerActive(false)
-          
-          // FIXED: Immediately handle timeout after logging
           handleCooperationTimeout()
-          
           return 0
         }
         return newTime
@@ -442,6 +468,7 @@ export default function RoomPage() {
 
   const stopCooperationTimer = () => {
     if (cooperationTimerRef.current) {
+      console.log("[DEBUG] Stopping timer")
       clearInterval(cooperationTimerRef.current)
       cooperationTimerRef.current = null
     }
@@ -449,24 +476,20 @@ export default function RoomPage() {
     setCooperationCountdown(5)
   }
 
-  // FIXED: Cooperation timeout handler with life reduction and turn switching
   const handleCooperationTimeout = () => {
     if (!socket || !room) return
     
     stopCooperationTimer()
     audio.playFailure()
     
-    // Immediately reduce life and switch turns
     const newLives = Math.max(0, (room.cooperation_lives || 3) - 1)
-    console.log(`Lives remaining: ${newLives}`)
+    console.log(`[DEBUG] Lives remaining: ${newLives}`)
     
-    // Find the other player for turn switching
     const otherPlayer = room.players.find(p => p.id !== playerId)
     if (otherPlayer) {
-      console.log(`Turn switched to player: ${otherPlayer.name}`)
+      console.log(`[DEBUG] Turn switched to player: ${otherPlayer.name}`)
     }
     
-    // Emit timeout event to server
     socket.emit("cooperation-timeout", {
       roomId,
       playerId,
@@ -480,23 +503,19 @@ export default function RoomPage() {
 
   // Handle answer submission
   const handleAnswer = async (answer: string, isTimeout: boolean = false) => {
-    if (!currentQuestion || isAnswering) return
+    if (!currentQuestion || isAnswering || isLoadingQuestion) return
     
     setIsAnswering(true)
     
-    if (timerRef.current) {
-      clearInterval(timerRef.current)
-    }
+    if (timerRef.current) clearInterval(timerRef.current)
 
     const isCorrect = answer === currentQuestion.correctAnswer
     const isPracticeMode = room?.game_mode === "practice"
     
-    // Show feedback
     setLastAnswerCorrect(isCorrect)
     setShowAnswerFeedback(true)
     setSelectedAnswer(answer)
     
-    // Play sound
     if (isCorrect) {
       audio.playSuccess()
     } else {
@@ -504,7 +523,6 @@ export default function RoomPage() {
     }
 
     try {
-      // FIXED: Send answer to server without triggering room update
       if (socket) {
         socket.emit("answer", {
           roomId,
@@ -520,22 +538,21 @@ export default function RoomPage() {
             console.error("❌ Failed to submit answer:", response.error)
             setError(response.error)
           } else {
-            // FIXED: Only update room state, don't trigger question reload
             setRoom(response.room)
           }
         })
       }
 
-      // Wait for feedback display, then load next question
       setTimeout(() => {
         setShowAnswerFeedback(false)
         setIsAnswering(false)
         setCurrentQuestion(null)
+        setSelectedAnswer("")
+        setLastAnswerCorrect(null)
         
-        // Load next question after delay
         if (room && (room.game_mode === "practice" || room.game_mode === "competition")) {
           setTimeout(() => {
-            loadQuestion(room)
+            debounceLoadQuestion(room)
           }, 500)
         }
       }, 2000)
@@ -544,6 +561,8 @@ export default function RoomPage() {
       console.error("❌ Error submitting answer:", error)
       setError("Failed to submit answer")
       setIsAnswering(false)
+      setShowAnswerFeedback(false)
+      setCurrentQuestion(null)
     }
   }
 
@@ -603,7 +622,7 @@ export default function RoomPage() {
     })
   }
 
-  // Handle host language selection (for competition mode)
+  // Handle host language selection
   const handleHostLanguageChange = (hostLanguage: string) => {
     if (!socket || !isCurrentPlayerHost) return
 
@@ -671,12 +690,10 @@ export default function RoomPage() {
   const handleLeaveRoom = () => {
     console.log("🚪 Leaving room...")
     
-    // Emit leave event if socket is available
     if (socket) {
       socket.emit("leave-room", { roomId, playerId })
     }
     
-    // Direct redirect to home URL
     window.location.href = "https://oneplswork.onrender.com/"
   }
 
@@ -699,7 +716,6 @@ export default function RoomPage() {
       const result = await response.json()
 
       if (result.isCorrect && !result.isUsed) {
-        // Correct answer - stop timer and submit
         stopCooperationTimer()
         audio.playSuccess()
         
@@ -714,7 +730,6 @@ export default function RoomPage() {
           }
         })
       } else {
-        // Wrong answer or already used
         console.log("❌ Cooperation answer result:", result.message)
         setError(result.message)
         setTimeout(() => setError(null), 3000)
@@ -853,8 +868,6 @@ export default function RoomPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Main Lobby Content */}
             <div className="lg:col-span-2 space-y-6">
-              
-              {/* 1. Players List (Top Priority) */}
               <Card className="mobile-card">
                 <CardHeader className="mobile-padding">
                   <CardTitle className="flex items-center gap-2 mobile-text-lg">
@@ -877,7 +890,6 @@ export default function RoomPage() {
                           )}
                         </div>
                       </div>
-                      
                       <div className="flex items-center gap-2">
                         {player.language && (
                           <Badge variant="outline" className="text-xs">
@@ -903,8 +915,6 @@ export default function RoomPage() {
                 </CardContent>
               </Card>
 
-              {/* 2. Game Settings */}
-              {/* Game Mode Selection */}
               {isCurrentPlayerHost && !room.game_mode && (
                 <Card className="mobile-card">
                   <CardHeader className="mobile-padding">
@@ -926,7 +936,6 @@ export default function RoomPage() {
                           <div className="text-sm text-gray-600">Individual language selection, no penalties</div>
                         </div>
                       </SoundButton>
-                      
                       <SoundButton
                         onClick={() => handleGameModeChange("competition")}
                         variant="outline"
@@ -938,7 +947,6 @@ export default function RoomPage() {
                           <div className="text-sm text-gray-600">Same language for all, point penalties apply</div>
                         </div>
                       </SoundButton>
-                      
                       <SoundButton
                         onClick={() => handleGameModeChange("cooperation")}
                         variant="outline"
@@ -955,7 +963,6 @@ export default function RoomPage() {
                 </Card>
               )}
 
-              {/* Game Settings */}
               {room.game_mode && (
                 <Card className="mobile-card">
                   <CardHeader className="mobile-padding">
@@ -965,7 +972,6 @@ export default function RoomPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="mobile-spacing-md mobile-padding">
-                    {/* Current Game Mode */}
                     <div className="flex items-center justify-between">
                       <span className="mobile-text-base font-medium">Game Mode:</span>
                       <div className="flex items-center gap-2">
@@ -998,8 +1004,6 @@ export default function RoomPage() {
                         )}
                       </div>
                     </div>
-
-                    {/* Target Score */}
                     <div className="flex items-center justify-between">
                       <span className="mobile-text-base font-medium">Target Score:</span>
                       {isCurrentPlayerHost ? (
@@ -1022,8 +1026,6 @@ export default function RoomPage() {
                         </Badge>
                       )}
                     </div>
-
-                    {/* Host Language (Competition Mode) */}
                     {room.game_mode === "competition" && (
                       <div className="flex items-center justify-between">
                         <span className="mobile-text-base font-medium">Language:</span>
@@ -1052,7 +1054,6 @@ export default function RoomPage() {
                 </Card>
               )}
 
-              {/* Language Selection (Practice/Cooperation Mode) */}
               {(room.game_mode === "practice" || room.game_mode === "cooperation") && (
                 <Card className="mobile-card">
                   <CardHeader className="mobile-padding">
@@ -1078,10 +1079,8 @@ export default function RoomPage() {
                 </Card>
               )}
 
-              {/* 3. Ready/Start Button */}
               {room.game_mode && (
                 <div className="space-y-4">
-                  {/* Ready Button */}
                   <div className="flex justify-center">
                     <SoundButton
                       onClick={handleReadyToggle}
@@ -1105,8 +1104,6 @@ export default function RoomPage() {
                       )}
                     </SoundButton>
                   </div>
-
-                  {/* Start Game Button (Host Only) */}
                   {isCurrentPlayerHost && room.players.every(p => p.ready) && (
                     <div className="flex justify-center">
                       <SoundButton
@@ -1122,7 +1119,6 @@ export default function RoomPage() {
               )}
             </div>
 
-            {/* 4. Rules Section (Side Panel) */}
             <div className="lg:col-span-1">
               <Card className="mobile-card">
                 <CardHeader className="mobile-padding">
@@ -1155,7 +1151,6 @@ export default function RoomPage() {
                       </div>
                     </div>
                   </div>
-
                   <div className="mobile-spacing-sm">
                     <p className="font-medium mobile-text-base">🎮 How to Play:</p>
                     <ul className="mobile-spacing-sm text-gray-600 ml-4">
@@ -1165,7 +1160,6 @@ export default function RoomPage() {
                       <li className="mobile-text-sm">• First to reach target score wins!</li>
                     </ul>
                   </div>
-
                   <div className="mobile-spacing-sm">
                     <p className="font-medium mobile-text-base">🌍 Languages:</p>
                     <div className="mobile-flex-wrap">
@@ -1176,7 +1170,6 @@ export default function RoomPage() {
                       ))}
                     </div>
                   </div>
-
                   {connectionStatus === 'error' && (
                     <div className="mobile-spacing-sm mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
                       <p className="font-medium text-red-700 mobile-text-sm">🔧 Connection Issues?</p>
@@ -1195,10 +1188,8 @@ export default function RoomPage() {
           </div>
         )}
 
-        {/* Practice/Competition Mode Gameplay */}
         {room.game_state === "playing" && (room.game_mode === "practice" || room.game_mode === "competition") && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Question Section */}
             <div className="lg:col-span-2 space-y-6">
               {isLoadingQuestion ? (
                 <Card className="mobile-card">
@@ -1279,7 +1270,6 @@ export default function RoomPage() {
               )}
             </div>
 
-            {/* Leaderboard */}
             <div className="lg:col-span-1">
               <div className="leaderboard-container">
                 <CardHeader className="mobile-padding">
@@ -1313,10 +1303,8 @@ export default function RoomPage() {
           </div>
         )}
 
-        {/* Cooperation Mode Gameplay */}
         {room.game_state === "playing" && room.game_mode === "cooperation" && (
           <div className="mobile-spacing-md">
-            {/* Cooperation Stats */}
             <Card className="mobile-card">
               <CardContent className="mobile-padding">
                 <div className="flex items-center justify-between">
@@ -1333,7 +1321,7 @@ export default function RoomPage() {
                       </div>
                       <div className="mobile-text-sm text-gray-600">Lives</div>
                     </div>
-                    {cooperationChallenge && (
+                    {cooperationChallenge && cooperationTimerActive && (
                       <div className="text-center">
                         <div className={`cooperation-timer ${cooperationCountdown <= 2 ? 'warning' : 'normal'}`}>
                           {cooperationCountdown}
@@ -1350,7 +1338,6 @@ export default function RoomPage() {
               </CardContent>
             </Card>
 
-            {/* Player Turn Indicators */}
             <Card className="mobile-card">
               <CardContent className="mobile-padding">
                 <div className="grid grid-cols-2 gap-4">
@@ -1384,7 +1371,6 @@ export default function RoomPage() {
               </CardContent>
             </Card>
 
-            {/* Cooperation Challenge */}
             {isCooperationWaiting ? (
               <Card className="mobile-card">
                 <CardContent className="flex flex-col items-center justify-center p-8">
@@ -1458,7 +1444,6 @@ export default function RoomPage() {
           </div>
         )}
 
-        {/* Game Finished */}
         {room.game_state === "finished" && (
           <div className="mobile-spacing-md">
             <Card className="mobile-card">
@@ -1476,7 +1461,6 @@ export default function RoomPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="mobile-spacing-md mobile-padding">
-                {/* Final Scores */}
                 <div className="mobile-spacing-sm">
                   <h3 className="mobile-text-lg font-semibold mb-3">Final Scores</h3>
                   {room.players
@@ -1501,8 +1485,6 @@ export default function RoomPage() {
                       </div>
                     ))}
                 </div>
-
-                {/* Restart Button (Host Only) */}
                 {isCurrentPlayerHost && (
                   <div className="flex justify-center">
                     <SoundButton
