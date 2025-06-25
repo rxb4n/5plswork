@@ -49,19 +49,17 @@ export interface Room {
   target_score: number;
 }
 
-// Initialize database tables
+// Enhanced database initialization with proper column checks
 export async function initDatabase() {
   const client = await pool.connect();
   try {
-    console.log("Initializing database...");
+    console.log("🔧 Initializing database...");
 
-    // Create rooms table with new game mode fields
+    // Create rooms table with all required columns
     await client.query(`
       CREATE TABLE IF NOT EXISTS rooms (
         id VARCHAR(6) PRIMARY KEY,
         game_state VARCHAR(20) DEFAULT 'lobby',
-        game_mode VARCHAR(20),
-        host_language VARCHAR(20),
         winner_id VARCHAR(50),
         last_activity TIMESTAMP DEFAULT NOW(),
         created_at TIMESTAMP DEFAULT NOW(),
@@ -69,6 +67,38 @@ export async function initDatabase() {
         target_score INTEGER DEFAULT 100 NOT NULL
       )
     `);
+
+    // Check and add game_mode column if it doesn't exist
+    const gameModeCheck = await client.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'rooms' AND column_name = 'game_mode'
+    `);
+    
+    if (gameModeCheck.rows.length === 0) {
+      console.log("➕ Adding game_mode column to rooms table...");
+      await client.query(`
+        ALTER TABLE rooms 
+        ADD COLUMN game_mode VARCHAR(20)
+      `);
+      console.log("✅ game_mode column added successfully");
+    }
+
+    // Check and add host_language column if it doesn't exist
+    const hostLanguageCheck = await client.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'rooms' AND column_name = 'host_language'
+    `);
+    
+    if (hostLanguageCheck.rows.length === 0) {
+      console.log("➕ Adding host_language column to rooms table...");
+      await client.query(`
+        ALTER TABLE rooms 
+        ADD COLUMN host_language VARCHAR(20)
+      `);
+      console.log("✅ host_language column added successfully");
+    }
 
     // Create players table
     await client.query(`
@@ -93,9 +123,22 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_players_last_seen ON players(last_seen);
     `);
 
-    console.log("Database initialized successfully");
+    // Verify schema
+    const schemaCheck = await client.query(`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_name = 'rooms'
+      ORDER BY ordinal_position
+    `);
+    
+    console.log("📋 Verified rooms table schema:");
+    schemaCheck.rows.forEach(row => {
+      console.log(`  - ${row.column_name}: ${row.data_type}`);
+    });
+
+    console.log("✅ Database initialized successfully");
   } catch (error) {
-    console.error("Database initialization error:", error);
+    console.error("❌ Database initialization error:", error);
     throw error;
   } finally {
     client.release();
@@ -309,6 +352,8 @@ export async function updatePlayer(playerId: string, updates: Partial<Player>): 
 export async function updateRoom(roomId: string, updates: Partial<Omit<Room, "players">>): Promise<boolean> {
   const client = await pool.connect();
   try {
+    await client.query("BEGIN");
+
     const updateFields: string[] = [];
     const values: any[] = [roomId];
     let paramIndex = 2;
@@ -319,17 +364,24 @@ export async function updateRoom(roomId: string, updates: Partial<Omit<Room, "pl
       paramIndex++;
     });
 
-    if (updateFields.length === 0) return true;
+    if (updateFields.length === 0) {
+      await client.query("COMMIT");
+      return true;
+    }
 
     const query = `UPDATE rooms SET ${updateFields.join(", ")}, last_activity = NOW() WHERE id = $1`;
-    console.log(`Updating room ${roomId}:`, query, values);
+    console.log(`🔧 Updating room ${roomId}:`, query, values);
     
     const result = await client.query(query, values);
-    console.log(`Room update result: ${result.rowCount} rows affected`);
+    console.log(`✅ Room update result: ${result.rowCount} rows affected`);
 
+    await client.query("COMMIT");
     return true;
   } catch (error) {
-    console.error(`Error updating room ${roomId}:`, error);
+    await client.query("ROLLBACK");
+    console.error(`❌ Error updating room ${roomId}:`, error);
+    console.error(`❌ Query was: UPDATE rooms SET ${Object.keys(updates).join(", ")} WHERE id = $1`);
+    console.error(`❌ Values were:`, [roomId, ...Object.values(updates)]);
     return false;
   } finally {
     client.release();

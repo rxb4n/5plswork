@@ -9,7 +9,9 @@
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "type-check": "tsc --noEmit",
-    "migrate": "ts-node scripts/migrate.ts"
+    "migrate": "node scripts/migrate-database.js",
+    "db:migrate": "node scripts/migrate-database.js",
+    "db:check": "node -e \"require('./scripts/migrate-database.js').migrateDatabase().then(() => process.exit(0)).catch(() => process.exit(1))\""
   },
   "dependencies": {
     "@radix-ui/react-progress": "^1.0.3",
