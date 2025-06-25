@@ -53,6 +53,7 @@ export interface Room {
   used_words?: string[];
   current_category?: string;
   current_challenge_player?: string;
+  cooperation_waiting?: boolean;
 }
 
 // Enhanced database initialization with cooperation mode support
@@ -112,7 +113,8 @@ export async function initDatabase() {
       { name: 'cooperation_score', type: 'INTEGER DEFAULT 0' },
       { name: 'used_words', type: 'TEXT[]' },
       { name: 'current_category', type: 'VARCHAR(50)' },
-      { name: 'current_challenge_player', type: 'VARCHAR(50)' }
+      { name: 'current_challenge_player', type: 'VARCHAR(50)' },
+      { name: 'cooperation_waiting', type: 'BOOLEAN DEFAULT FALSE' }
     ];
 
     for (const column of cooperationColumns) {
@@ -285,6 +287,7 @@ export async function getRoom(roomId: string): Promise<Room | null> {
       used_words: room.used_words || [],
       current_category: room.current_category,
       current_challenge_player: room.current_challenge_player,
+      cooperation_waiting: room.cooperation_waiting,
     };
   } catch (error) {
     console.error(`Error getting room ${roomId}:`, error);

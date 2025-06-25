@@ -39,15 +39,23 @@ const roomActivityTracker = new Map<string, {
   players: Set<string>
 }>()
 
-// CRITICAL: This is the default export that Next.js requires
+// Cooperation mode challenge tracking
+const cooperationChallenges = new Map<string, {
+  challengeId: string
+  categoryId: string
+  language: string
+  targetPlayerId: string
+  startTime: Date
+  timeout?: NodeJS.Timeout
+}>()
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // CRITICAL: Ensure Socket.IO server is only initialized once
   if (!res.socket.server.io) {
     await ensureDbInitialized()
 
     console.log("🚀 Initializing Socket.IO server...")
 
-    // STEP 1: Clear all existing rooms immediately
+    // Clear all existing rooms immediately
     console.log("🧹 Clearing all existing rooms from system...");
     const clearedRooms = await clearAllRooms();
     console.log(`✅ Cleared ${clearedRooms} existing rooms`);
@@ -92,10 +100,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     })
 
-    // STEP 2: Set up automatic room cleanup mechanism
+    // Set up automatic room cleanup mechanism
     console.log("🔧 Setting up automatic room cleanup mechanism...");
 
-    // Function to update room activity
     function updateRoomActivityTracker(roomId: string, playerId?: string) {
       const now = new Date();
       const existing = roomActivityTracker.get(roomId);
@@ -114,7 +121,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         });
       }
 
-      // Also update database timestamp
       updateRoomActivity(roomId).catch(err => {
         console.error(`Failed to update room activity in DB for ${roomId}:`, err);
       });
@@ -122,7 +128,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.log(`📊 Activity updated for room ${roomId} (${roomActivityTracker.get(roomId)?.players.size || 0} tracked players)`);
     }
 
-    // Function to issue inactivity warning
     async function issueInactivityWarning(roomId: string) {
       const warningMessage = {
         type: "inactivity_warning",
@@ -135,7 +140,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.log(`⚠️ Inactivity warning sent to room ${roomId}`);
     }
 
-    // STEP 3: Periodic cleanup process (every 60 seconds)
+    // Periodic cleanup process (every 60 seconds)
     const cleanupInterval = setInterval(async () => {
       try {
         const now = new Date();
@@ -144,21 +149,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         console.log(`🔍 Checking ${roomActivityTracker.size} rooms for activity...`);
 
-        // Check tracked rooms for inactivity
         for (const [roomId, activity] of roomActivityTracker.entries()) {
           const timeSinceLastActivity = now.getTime() - activity.lastActivity.getTime();
 
-          // Issue warning at 90 seconds
           if (timeSinceLastActivity > WARNING_THRESHOLD && !activity.warningIssued) {
             await issueInactivityWarning(roomId);
             activity.warningIssued = true;
           }
 
-          // Remove room at 120 seconds
           if (timeSinceLastActivity > INACTIVITY_THRESHOLD) {
             console.log(`🚨 Room ${roomId} inactive for ${Math.round(timeSinceLastActivity / 1000)}s, removing`);
             
-            // Notify clients
             io.to(roomId).emit("room-closed", {
               type: "inactivity_cleanup",
               message: "Room closed due to inactivity",
@@ -166,36 +167,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               timestamp: new Date().toISOString()
             });
 
-            // Remove from tracking
             roomActivityTracker.delete(roomId);
           }
         }
 
-        // Database cleanup for inactive rooms
         const cleanedInactive = await cleanupInactiveRooms(io, INACTIVITY_THRESHOLD);
         if (cleanedInactive > 0) {
           console.log(`🧹 Database cleanup: ${cleanedInactive} inactive rooms removed`);
           broadcastAvailableRooms(io);
         }
 
-        // Cleanup empty rooms
         const cleanedEmpty = await cleanupEmptyRooms(io);
         if (cleanedEmpty > 0) {
           console.log(`🧹 Database cleanup: ${cleanedEmpty} empty rooms removed`);
           broadcastAvailableRooms(io);
         }
 
-        // Cleanup old rooms (fallback)
         await cleanupOldRooms(io);
 
       } catch (error) {
         console.error("❌ Error during periodic cleanup:", error);
       }
-    }, 60000); // Run every 60 seconds
+    }, 60000);
 
     console.log("✅ Automatic cleanup mechanism started (checking every 60 seconds)");
 
-    // Cleanup on server shutdown
     process.on('SIGTERM', () => {
       console.log('🛑 Shutting down cleanup interval...');
       clearInterval(cleanupInterval);
@@ -212,7 +208,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.log("  - Socket ID:", socket.id)
       console.log("  - Transport:", socket.conn.transport.name)
 
-      // Validate namespace
       if (socket.nsp.name !== "/") {
         console.error("❌ Invalid namespace detected:", socket.nsp.name)
         socket.emit("error", { 
@@ -231,7 +226,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         namespace: socket.nsp.name
       })
 
-      // STEP 4: Track room activity on all player interactions
       socket.on("create-room", async ({ roomId, playerId, data }, callback) => {
         try {
           console.log(`🏠 Creating room ${roomId} with target score ${data?.targetScore}`)
@@ -242,7 +236,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
           socket.join(roomId)
           
-          // Track room activity
           updateRoomActivityTracker(roomId, playerId)
           
           callback({ room })
@@ -272,7 +265,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             })
           }
 
-          // Check cooperation mode player limit
           if (room.game_mode === "cooperation" && room.players.length >= 2) {
             return callback({
               error: "Cannot join: Cooperation mode is limited to 2 players.",
@@ -295,7 +287,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
           socket.join(roomId)
           
-          // Track room activity
           updateRoomActivityTracker(roomId, playerId)
           
           const updatedRoom = await getRoom(roomId)
@@ -310,7 +301,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // Handle activity pings to keep rooms alive
       socket.on("room-activity-ping", ({ roomId, playerId }) => {
         if (roomId && playerId) {
           updateRoomActivityTracker(roomId, playerId)
@@ -341,10 +331,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Only the room creator can update the game mode", status: 403 })
           }
           
-          // Track room activity
           updateRoomActivityTracker(roomId, playerId)
 
-          // Initialize cooperation mode fields if needed
           const updateData: any = { game_mode: data.gameMode }
           if (data.gameMode === "cooperation") {
             updateData.cooperation_lives = 3
@@ -352,6 +340,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             updateData.used_words = []
             updateData.current_category = null
             updateData.current_challenge_player = null
+            updateData.cooperation_waiting = false
           }
           
           const success = await updateRoom(roomId, updateData)
@@ -370,7 +359,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // NEW: Handle game mode change (reset and allow new selection)
       socket.on("change-game-mode", async ({ roomId, playerId }, callback) => {
         try {
           console.log(`🔄 Changing game mode for room ${roomId} by host ${playerId}`)
@@ -383,10 +371,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Only the room creator can change the game mode", status: 403 })
           }
           
-          // Track room activity
           updateRoomActivityTracker(roomId, playerId)
           
-          // Reset game mode and related settings
           const success = await updateRoom(roomId, { 
             game_mode: null,
             host_language: null,
@@ -394,13 +380,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             cooperation_score: null,
             used_words: null,
             current_category: null,
-            current_challenge_player: null
+            current_challenge_player: null,
+            cooperation_waiting: null
           })
           if (!success) {
             return callback({ error: "Failed to reset game mode", status: 500 })
           }
 
-          // Reset all players' ready status and language (for practice mode)
           for (const p of room.players) {
             await updatePlayer(p.id, { 
               ready: false,
@@ -411,7 +397,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           
-          // Notify all players about the game mode change
           io.to(roomId).emit("game-mode-changed", {
             type: "mode_reset",
             message: "Host is changing the game mode",
@@ -441,7 +426,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Only the room creator can update the host language", status: 403 })
           }
           
-          // Track room activity
           updateRoomActivityTracker(roomId, playerId)
           
           const success = await updateRoom(roomId, { host_language: data.hostLanguage })
@@ -472,7 +456,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Player not found", status: 404 })
           }
           
-          // Track room activity
           updateRoomActivityTracker(roomId, playerId)
           
           const shouldResetReady = !player.language
@@ -505,7 +488,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Player not found", status: 404 })
           }
           
-          // Check requirements based on game mode
           if ((room.game_mode === "practice" || room.game_mode === "cooperation") && !player.language) {
             return callback({ error: "Select a language first", status: 400 })
           }
@@ -516,7 +498,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Game mode must be selected first", status: 400 })
           }
           
-          // Track room activity
           updateRoomActivityTracker(roomId, playerId)
           
           const success = await updatePlayer(playerId, { ready: !player.ready })
@@ -549,7 +530,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Invalid target score", status: 400 })
           }
           
-          // Track room activity
           updateRoomActivityTracker(roomId, playerId)
           
           const success = await updateRoom(roomId, { target_score: targetScore })
@@ -582,7 +562,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Only the room creator can start the game", status: 403 })
           }
           
-          // Check game mode requirements
           if (!room.game_mode) {
             return callback({ error: "Game mode must be selected first", status: 400 })
           }
@@ -624,10 +603,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
           console.log(`✅ All requirements met - starting game with ${room.players.length} players`)
 
-          // Track room activity
           updateRoomActivityTracker(roomId, playerId)
 
-          const roomUpdateSuccess = await updateRoom(roomId, { game_state: "playing", question_count: 0 })
+          const updateData: any = { game_state: "playing", question_count: 0 }
+          if (room.game_mode === "cooperation") {
+            updateData.cooperation_waiting = true
+          }
+
+          const roomUpdateSuccess = await updateRoom(roomId, updateData)
           if (!roomUpdateSuccess) {
             console.log(`❌ Failed to update room state`)
             return callback({ error: "Failed to start game", status: 500 })
@@ -639,9 +622,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
 
-          // Start cooperation mode challenges
           if (room.game_mode === "cooperation") {
-            startCooperationChallenge(roomId, io)
+            io.to(roomId).emit("cooperation-waiting", { isWaiting: true })
+            setTimeout(() => {
+              startCooperationChallenge(roomId, io)
+            }, 2000)
           }
           
           broadcastAvailableRooms(io)
@@ -677,14 +662,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             newScore = player.score + pointsChange
             console.log(`✅ Correct answer! Player ${playerId} earned ${pointsChange} points`)
           } else if (!isPracticeMode) {
-            // Only apply penalties in competition mode
             newScore = Math.max(0, player.score - 5)
             console.log(`❌ Wrong answer in competition mode! Player ${playerId} loses 5 points`)
           } else {
             console.log(`❌ Wrong answer in practice mode - no penalty`)
           }
           
-          // Track room activity
           updateRoomActivityTracker(roomId, playerId)
           
           await updatePlayer(playerId, { score: newScore })
@@ -709,7 +692,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // NEW: Cooperation mode handlers
+      // Cooperation mode handlers
       socket.on("cooperation-answer", async ({ roomId, playerId, data }, callback) => {
         try {
           console.log(`🤝 Processing cooperation answer for player ${playerId}`)
@@ -722,18 +705,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const { challengeId, answer, isCorrect, wordId } = data
 
           if (isCorrect) {
-            // Add word to used words and increment score
             const newUsedWords = [...(room.used_words || []), wordId]
             const newScore = (room.cooperation_score || 0) + 1
 
             await updateRoom(roomId, {
               used_words: newUsedWords,
-              cooperation_score: newScore
+              cooperation_score: newScore,
+              cooperation_waiting: true
             })
 
             console.log(`✅ Cooperation correct answer! New score: ${newScore}`)
 
-            // Start next challenge after a short delay
+            // Send waiting state and start next challenge
+            io.to(roomId).emit("cooperation-waiting", { isWaiting: true })
             setTimeout(() => {
               startCooperationChallenge(roomId, io)
             }, 3000)
@@ -759,20 +743,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const newLives = Math.max(0, (room.cooperation_lives || 3) - 1)
           
           if (newLives === 0) {
-            // Game over
             await updateRoom(roomId, {
               cooperation_lives: newLives,
               game_state: "finished"
             })
             console.log(`💀 Cooperation game over! Final score: ${room.cooperation_score || 0}`)
           } else {
-            // Continue with fewer lives
             await updateRoom(roomId, {
-              cooperation_lives: newLives
+              cooperation_lives: newLives,
+              cooperation_waiting: true
             })
             console.log(`💔 Lost a life! Lives remaining: ${newLives}`)
 
-            // Start next challenge after a short delay
+            // Send waiting state and start next challenge
+            io.to(roomId).emit("cooperation-waiting", { isWaiting: true })
             setTimeout(() => {
               startCooperationChallenge(roomId, io)
             }, 3000)
@@ -784,6 +768,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         } catch (error) {
           console.error(`❌ Error processing cooperation timeout:`, error)
         }
+      })
+
+      // Handle cooperation typing events
+      socket.on("cooperation-typing", ({ roomId, playerId, text }) => {
+        socket.to(roomId).emit("cooperation-typing", { playerId, text })
       })
 
       socket.on("restart", async ({ roomId, playerId }, callback) => {
@@ -799,7 +788,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
           console.log(`🔄 Restarting game in room ${roomId}`)
           
-          // Track room activity
           updateRoomActivityTracker(roomId, playerId)
           
           await updateRoom(roomId, {
@@ -813,7 +801,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             cooperation_score: null,
             used_words: null,
             current_category: null,
-            current_challenge_player: null
+            current_challenge_player: null,
+            cooperation_waiting: null
           })
           
           for (const p of room.players) {
@@ -836,7 +825,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         try {
           console.log(`🚪 Player ${playerId} leaving room ${roomId}`)
           
-          // Remove from activity tracking
           const activity = roomActivityTracker.get(roomId)
           if (activity) {
             activity.players.delete(playerId)
@@ -952,7 +940,8 @@ async function startCooperationChallenge(roomId: string, io: SocketIOServer) {
       // Update room with current challenge info
       await updateRoom(roomId, {
         current_category: challenge.categoryId,
-        current_challenge_player: randomPlayer.id
+        current_challenge_player: randomPlayer.id,
+        cooperation_waiting: false
       })
 
       // Send challenge to all players
