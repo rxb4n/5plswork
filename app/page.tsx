@@ -226,21 +226,6 @@ export default function HomePage() {
     return null
   }
 
-  const getRoomStatusDisplay = (room: AvailableRoom) => {
-    if (room.gameMode) {
-      return (
-        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-          ✅ Ready to Join
-        </Badge>
-      )
-    }
-    return (
-      <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-200">
-        ⚙️ Setting Up
-      </Badge>
-    )
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
       <div className="max-w-6xl mx-auto">
@@ -339,7 +324,7 @@ export default function HomePage() {
               </CardContent>
             </Card>
 
-            {/* Enhanced Available Rooms */}
+            {/* Available Rooms - Updated Layout */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -372,59 +357,32 @@ export default function HomePage() {
                     <p className="text-sm">Be the first to create a room!</p>
                   </div>
                 ) : (
-                  <div className="grid gap-4">
+                  <div className="grid gap-3">
                     {availableRooms.map((room) => (
                       <div
                         key={room.id}
                         className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors"
                       >
-                        <div className="flex items-start gap-4 flex-1">
-                          {/* Room Code and Basic Info */}
+                        <div className="flex items-center gap-6 flex-1">
+                          {/* Room ID */}
                           <div className="min-w-0">
-                            <p className="font-mono text-lg font-bold text-blue-600 mb-1">
+                            <p className="font-mono text-lg font-bold text-blue-600">
                               {room.id}
                             </p>
-                            <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
-                              <span>Target: {room.targetScore} points</span>
-                              <span>•</span>
-                              <Badge variant="outline" className="text-xs">
-                                {room.playerCount}/{room.maxPlayers} players
-                              </Badge>
-                            </div>
                           </div>
 
-                          {/* Game Mode and Language Info */}
-                          <div className="flex flex-col gap-2 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-medium text-gray-700">Mode:</span>
-                              {getGameModeDisplay(room)}
-                            </div>
-                            
-                            {room.gameMode === "competition" && (
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-sm font-medium text-gray-700">Language:</span>
-                                {getLanguageDisplay(room) || (
-                                  <Badge variant="outline" className="text-xs bg-gray-50 text-gray-600">
-                                    <Settings className="h-3 w-3 mr-1" />
-                                    Not selected
-                                  </Badge>
-                                )}
-                              </div>
-                            )}
-
-                            {room.gameMode === "practice" && (
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-gray-700">Languages:</span>
-                                <Badge variant="outline" className="text-xs bg-blue-50 text-blue-600">
-                                  Individual choice
-                                </Badge>
-                              </div>
-                            )}
+                          {/* Player Count */}
+                          <div className="flex items-center gap-2">
+                            <Users className="h-4 w-4 text-gray-500" />
+                            <Badge variant="outline" className="text-xs">
+                              {room.playerCount}/{room.maxPlayers}
+                            </Badge>
                           </div>
 
-                          {/* Status */}
-                          <div className="flex flex-col items-end gap-2">
-                            {getRoomStatusDisplay(room)}
+                          {/* Game Mode */}
+                          <div className="flex items-center gap-2">
+                            {getGameModeDisplay(room)}
+                            {getLanguageDisplay(room)}
                           </div>
                         </div>
 
