@@ -252,6 +252,20 @@ export default function LanguageQuizGame() {
         targetScore: room.targetScore,
       });
 
+      // CRITICAL: Check if host left the room
+      const currentHost = room.players.find(p => p.isHost);
+      const wasHost = currentPlayer?.isHost;
+      
+      // If we were the host but no longer in the room, or if there's no host at all
+      if ((wasHost && !room.players.find(p => p.id === currentPlayer?.id)) || 
+          (!currentHost && room.players.length > 0)) {
+        console.log("🚨 Host left the room! Refreshing page for all players...");
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+        return;
+      }
+
       // CRITICAL: Always update players list immediately
       setPlayers(room.players);
       setConnectionError(null);
@@ -300,6 +314,14 @@ export default function LanguageQuizGame() {
         setWinner(null);
         setIsStartingGame(false);
       }
+    });
+
+    // NEW: Handle host-left event
+    newSocket.on("host-left", () => {
+      console.log("🚨 Received host-left event - refreshing page");
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
     });
 
     newSocket.on("error", (data: { message: string; status?: number }) => {
@@ -705,9 +727,10 @@ export default function LanguageQuizGame() {
 
   // Lobby Screen
   if (gameState === "lobby") {
-    const playersWithLanguages = players.filter((p) => p.language);
-    const allPlayersWithLanguagesReady = playersWithLanguages.length > 0 && playersWithLanguages.every((p) => p.ready);
-    const canStartGame = currentPlayer?.isHost && allPlayersWithLanguagesReady;
+    // STRICT REQUIREMENT: ALL players must have a language selected
+    const allPlayersHaveLanguage = players.length > 0 && players.every((p) => p.language !== null);
+    const allPlayersReady = players.length > 0 && players.every((p) => p.ready);
+    const canStartGame = currentPlayer?.isHost && allPlayersHaveLanguage && allPlayersReady;
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
@@ -764,10 +787,12 @@ export default function LanguageQuizGame() {
                         {player.isHost && <span className="text-xs text-gray-500">(Host)</span>}
                       </div>
                       <div className="flex items-center gap-2">
-                        {player.language && (
+                        {player.language ? (
                           <Badge variant="secondary">
                             {player.language.charAt(0).toUpperCase() + player.language.slice(1)}
                           </Badge>
+                        ) : (
+                          <Badge variant="destructive">No Language</Badge>
                         )}
                         {player.ready && <Badge className="bg-green-500">Ready</Badge>}
                       </div>
@@ -775,6 +800,19 @@ export default function LanguageQuizGame() {
                   ))
                 )}
               </div>
+
+              {/* STRICT REQUIREMENT WARNING */}
+              {!allPlayersHaveLanguage && players.length > 0 && (
+                <div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                  <div className="flex items-center gap-2 text-orange-700">
+                    <AlertTriangle className="w-4 h-4" />
+                    <span className="font-medium">All players must select a language before starting!</span>
+                  </div>
+                  <p className="text-sm text-orange-600 mt-1">
+                    Players without languages: {players.filter(p => !p.language).map(p => p.name).join(", ")}
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -841,10 +879,12 @@ export default function LanguageQuizGame() {
                 >
                   {isStartingGame
                     ? "Starting Game..."
-                    : playersWithLanguages.length === 0
-                    ? "At least one player needs to select a language"
-                    : !allPlayersWithLanguagesReady
-                    ? "All players with languages must be ready"
+                    : players.length === 0
+                    ? "Need at least one player"
+                    : !allPlayersHaveLanguage
+                    ? "All players must select a language"
+                    : !allPlayersReady
+                    ? "All players must be ready"
                     : "Start Game"}
                 </Button>
               )}

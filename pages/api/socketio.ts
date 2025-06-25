@@ -199,7 +199,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // SIMPLIFIED: Start game handler - just changes room state to "playing"
+      // STRICT: Start game handler - requires ALL players to have languages
       socket.on("start-game", async ({ roomId, playerId }, callback) => {
         try {
           console.log(`🎮 Starting game - Room: ${roomId}, Host: ${playerId}`)
@@ -216,22 +216,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Only the room creator can start the game", status: 403 })
           }
           
-          const playersWithLanguage = room.players.filter((p) => p.language)
-          console.log(`Players with language: ${playersWithLanguage.length}`)
-          
-          if (playersWithLanguage.length === 0) {
-            console.log(`❌ No players have selected a language`)
-            return callback({ error: "At least one player must select a language", status: 400 })
+          // STRICT REQUIREMENT: ALL players must have a language
+          const playersWithoutLanguage = room.players.filter((p) => !p.language)
+          if (playersWithoutLanguage.length > 0) {
+            console.log(`❌ Players without language: ${playersWithoutLanguage.map(p => p.name).join(", ")}`)
+            return callback({ 
+              error: `All players must select a language. Missing: ${playersWithoutLanguage.map(p => p.name).join(", ")}`, 
+              status: 400 
+            })
           }
           
-          if (!playersWithLanguage.every((p) => p.ready)) {
-            console.log(`❌ Not all players with languages are ready`)
-            return callback({ error: "All players with languages must be ready", status: 400 })
+          // STRICT REQUIREMENT: ALL players must be ready
+          const playersNotReady = room.players.filter((p) => !p.ready)
+          if (playersNotReady.length > 0) {
+            console.log(`❌ Players not ready: ${playersNotReady.map(p => p.name).join(", ")}`)
+            return callback({ 
+              error: `All players must be ready. Not ready: ${playersNotReady.map(p => p.name).join(", ")}`, 
+              status: 400 
+            })
           }
 
-          console.log(`✅ Pre-flight checks passed, updating room state to playing`)
+          console.log(`✅ STRICT checks passed - ALL ${room.players.length} players have languages and are ready`)
 
-          // Simply update room to playing state - questions will be fetched by client via API
+          // Update room to playing state
           const roomUpdateSuccess = await updateRoom(roomId, { game_state: "playing", question_count: 0 })
           if (!roomUpdateSuccess) {
             console.log(`❌ Failed to update room state`)
@@ -239,7 +246,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
 
           const updatedRoom = await getRoom(roomId)
-          console.log(`✅ Game started successfully`)
+          console.log(`✅ Game started successfully with STRICT requirements met`)
 
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
@@ -249,7 +256,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // SIMPLIFIED: Answer handler - just updates score, no question management
+      // Answer handler - just updates score, no question management
       socket.on("answer", async ({ roomId, playerId, data }, callback) => {
         try {
           console.log(`📝 Processing answer for player ${playerId}`)
@@ -339,10 +346,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // Leave room handler
+      // ENHANCED: Leave room handler with host detection
       socket.on("leave-room", async ({ roomId, playerId }) => {
         try {
           console.log(`🚪 Player ${playerId} leaving room ${roomId}`)
+          
+          // Get room state BEFORE removing player to check if they were host
+          const roomBeforeLeave = await getRoom(roomId)
+          const leavingPlayer = roomBeforeLeave?.players.find(p => p.id === playerId)
+          const wasHost = leavingPlayer?.is_host || false
+          
+          console.log(`Player ${playerId} was host: ${wasHost}`)
           
           // Remove player from database
           await removePlayerFromRoom(playerId)
@@ -360,8 +374,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return
           }
           
-          // Emit room update to remaining players
-          io.to(roomId).emit("room-update", { room })
+          // CRITICAL: If the host left, notify all remaining players to refresh
+          if (wasHost) {
+            console.log(`🚨 HOST LEFT ROOM ${roomId} - Notifying all remaining players to refresh`)
+            io.to(roomId).emit("host-left")
+            // Also send error message as backup
+            setTimeout(() => {
+              io.to(roomId).emit("error", { message: "Host left the room", status: 404 })
+            }, 500)
+          } else {
+            // Normal player left - just update room
+            io.to(roomId).emit("room-update", { room })
+          }
+          
           console.log(`✅ Player ${playerId} left room ${roomId}`)
         } catch (error) {
           console.error(`❌ Error handling leave-room for player ${playerId}:`, error)
