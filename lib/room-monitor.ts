@@ -322,3 +322,5 @@ class RoomActivityMonitor {
 
 // Fixed: Single export statement only
 export { RoomActivityMonitor, type RoomActivity }
+
+export { RoomActivityMonitor }
