@@ -321,3 +321,5 @@ class RoomActivityMonitor {
 }
 
 export { RoomActivityMonitor, type RoomActivity }
+
+export { RoomActivityMonitor }
