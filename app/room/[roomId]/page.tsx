@@ -105,12 +105,118 @@ export default function RoomPage() {
     countdown: number
   }>({ show: false, message: "", countdown: 0 })
 
-  // NEW: Game mode transition state
+  // Game mode transition state
   const [gameModeTransition, setGameModeTransition] = useState<{
     show: boolean
     message: string
     newMode: string
   }>({ show: false, message: "", newMode: "" })
+
+  // NEW: Function to handle player removal via API call
+  const removePlayerFromRoom = useCallback(async (roomId: string, playerId: string): Promise<boolean> => {
+    try {
+      console.log(`🚪 Making API call to remove player ${playerId} from room ${roomId}`)
+      
+      // Use fetch with a short timeout for beforeunload scenarios
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 2000) // 2 second timeout
+      
+      const response = await fetch('/api/leave-room', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          roomId,
+          playerId,
+          reason: 'page_unload'
+        }),
+        signal: controller.signal,
+        keepalive: true // Important for beforeunload requests
+      })
+      
+      clearTimeout(timeoutId)
+      
+      if (response.ok) {
+        console.log(`✅ Successfully removed player ${playerId} from room ${roomId}`)
+        return true
+      } else {
+        console.error(`❌ Failed to remove player: ${response.status} ${response.statusText}`)
+        return false
+      }
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        console.warn(`⏰ API call timeout when removing player ${playerId}`)
+      } else {
+        console.error(`❌ Error removing player ${playerId}:`, error)
+      }
+      return false
+    }
+  }, [])
+
+  // NEW: Set up beforeunload event listener
+  useEffect(() => {
+    if (!roomId || !playerId || !room) return
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      console.log(`🚨 Page unload detected - attempting to remove player ${playerId} from room ${roomId}`)
+      
+      // Attempt to remove player via API call
+      // Note: This is a best-effort attempt as browsers limit what can be done in beforeunload
+      removePlayerFromRoom(roomId, playerId).catch(error => {
+        console.error('Failed to remove player during page unload:', error)
+      })
+
+      // Also try to emit socket event if still connected
+      if (socket && socket.connected) {
+        try {
+          socket.emit("leave-room", { roomId, playerId })
+          console.log(`📡 Socket leave-room event sent for player ${playerId}`)
+        } catch (error) {
+          console.error('Failed to emit leave-room event:', error)
+        }
+      }
+
+      // Optional: Show confirmation dialog (browsers may ignore this)
+      const message = "Are you sure you want to leave the game room?"
+      event.returnValue = message
+      return message
+    }
+
+    // Add the event listener
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    console.log(`🔒 beforeunload event listener added for player ${playerId} in room ${roomId}`)
+
+    // Cleanup function
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      console.log(`🔓 beforeunload event listener removed for player ${playerId}`)
+    }
+  }, [roomId, playerId, room, socket, removePlayerFromRoom])
+
+  // NEW: Set up visibility change event listener (additional fallback)
+  useEffect(() => {
+    if (!roomId || !playerId || !room) return
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        console.log(`👁️ Page hidden - sending activity ping for player ${playerId}`)
+        
+        // Send a final activity ping when page becomes hidden
+        if (socket && socket.connected) {
+          socket.emit("room-activity-ping", { roomId, playerId })
+        }
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    console.log(`👁️ visibilitychange event listener added for player ${playerId}`)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      console.log(`👁️ visibilitychange event listener removed for player ${playerId}`)
+    }
+  }, [roomId, playerId, room, socket])
 
   // Initialize socket and join room
   useEffect(() => {
@@ -261,7 +367,7 @@ export default function RoomPage() {
       }, 2000)
     })
 
-    // NEW: Handle game mode change notifications
+    // Handle game mode change notifications
     newSocket.on("game-mode-changed", (data) => {
       console.log("🎮 Game mode changed:", data)
       setGameModeTransition({
@@ -298,6 +404,7 @@ export default function RoomPage() {
 
     return () => {
       if (newSocket) {
+        console.log("🧹 Cleaning up socket connection...")
         newSocket.emit("leave-room", { roomId, playerId })
         newSocket.close()
       }
@@ -407,7 +514,7 @@ export default function RoomPage() {
     })
   }
 
-  // NEW: Handle game mode change (reset and switch)
+  // Handle game mode change (reset and switch)
   const handleChangeGameMode = () => {
     if (!socket || !currentPlayer?.is_host) return
 
@@ -701,7 +808,7 @@ export default function RoomPage() {
         </div>
       )}
 
-      {/* NEW: Game Mode Transition Banner */}
+      {/* Game Mode Transition Banner */}
       {gameModeTransition.show && (
         <div className="fixed top-0 left-0 right-0 z-50 bg-blue-500 text-white p-4 text-center">
           <div className="flex items-center justify-center gap-2">
@@ -752,7 +859,7 @@ export default function RoomPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* NEW: Change Game Mode Button (Host Only, Lobby State) */}
+            {/* Change Game Mode Button (Host Only, Lobby State) */}
             {room.game_state === "lobby" && currentPlayer.is_host && room.game_mode && (
               <SoundButton
                 onClick={handleChangeGameMode}
@@ -876,7 +983,7 @@ export default function RoomPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between">
                     <span>Game Setup</span>
-                    {/* NEW: Change Mode Button in Header */}
+                    {/* Change Mode Button in Header */}
                     {currentPlayer.is_host && (
                       <SoundButton
                         onClick={handleChangeGameMode}
