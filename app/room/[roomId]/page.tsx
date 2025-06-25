@@ -119,6 +119,7 @@ export default function RoomPage() {
   const [isAnswering, setIsAnswering] = useState(false)
   const [questionStartTime, setQuestionStartTime] = useState<number>(0)
   const [questionLoadingError, setQuestionLoadingError] = useState<string | null>(null)
+  const [isLoadingQuestion, setIsLoadingQuestion] = useState(false)
 
   // Cooperation mode state
   const [cooperationChallenge, setCooperationChallenge] = useState<CooperationChallenge | null>(null)
@@ -128,6 +129,117 @@ export default function RoomPage() {
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const activityPingRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Load question function
+  const loadQuestion = async (language: string): Promise<Question | null> => {
+    console.log(`🔍 [GAME] Loading question for ${language}`)
+    setIsLoadingQuestion(true)
+    setQuestionLoadingError(null)
+    
+    try {
+      const response = await fetch('/api/get-question', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ language })
+      })
+
+      console.log(`📡 [GAME] Question API response status: ${response.status}`)
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      console.log(`✅ [GAME] Question loaded successfully:`, data)
+      
+      if (data.success && data.question) {
+        console.log(`📝 [GAME] Question details:`)
+        console.log(`  - ID: ${data.question.questionId}`)
+        console.log(`  - English: ${data.question.english}`)
+        console.log(`  - Correct Answer: ${data.question.correctAnswer}`)
+        console.log(`  - Options: ${data.question.options.join(', ')}`)
+        
+        setCurrentQuestion(data.question)
+        setSelectedAnswer("")
+        setTimeLeft(10)
+        setQuestionStartTime(Date.now())
+        
+        // Start timer
+        if (timerRef.current) {
+          clearInterval(timerRef.current)
+        }
+        
+        timerRef.current = setInterval(() => {
+          setTimeLeft(prev => {
+            if (prev <= 1) {
+              // Time's up - auto submit
+              handleAnswerSubmit("", data.question.correctAnswer, language === currentPlayer?.language)
+              return 0
+            }
+            return prev - 1
+          })
+        }, 1000)
+        
+        return data.question
+      } else {
+        throw new Error('Invalid question data received')
+      }
+    } catch (error) {
+      console.error(`❌ [GAME] Question loading failed:`, error)
+      setQuestionLoadingError(`Failed to load question: ${error.message}`)
+      return null
+    } finally {
+      setIsLoadingQuestion(false)
+    }
+  }
+
+  // Handle answer submission
+  const handleAnswerSubmit = async (answer: string, correctAnswer: string, isPracticeMode: boolean) => {
+    if (isAnswering) return
+    
+    setIsAnswering(true)
+    
+    // Clear timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+
+    console.log(`📝 [GAME] Submitting answer: "${answer}" (correct: "${correctAnswer}")`)
+
+    try {
+      if (socket) {
+        socket.emit("answer", {
+          roomId,
+          playerId,
+          data: {
+            answer,
+            timeLeft,
+            correctAnswer,
+            isPracticeMode
+          }
+        }, (response: any) => {
+          if (response.error) {
+            console.error("❌ Failed to submit answer:", response.error)
+            setError(response.error)
+          } else {
+            console.log("✅ Answer submitted successfully")
+            // Load next question after a short delay
+            setTimeout(() => {
+              const currentPlayer = room?.players.find(p => p.id === playerId)
+              if (currentPlayer?.language && room?.game_state === "playing") {
+                loadQuestion(currentPlayer.language)
+              }
+            }, 2000)
+          }
+          setIsAnswering(false)
+        })
+      }
+    } catch (error) {
+      console.error("❌ Error submitting answer:", error)
+      setIsAnswering(false)
+    }
+  }
 
   // Initialize socket connection
   useEffect(() => {
@@ -222,6 +334,23 @@ export default function RoomPage() {
     newSocket.on("room-update", ({ room: updatedRoom }: { room: Room }) => {
       console.log("📡 Room updated:", updatedRoom)
       setRoom(updatedRoom)
+      
+      // If game just started, load first question
+      if (updatedRoom.game_state === "playing" && !currentQuestion) {
+        const currentPlayer = updatedRoom.players.find(p => p.id === playerId)
+        if (currentPlayer?.language && (updatedRoom.game_mode === "practice" || updatedRoom.game_mode === "competition")) {
+          const language = updatedRoom.game_mode === "practice" 
+            ? currentPlayer.language 
+            : updatedRoom.host_language
+          
+          if (language) {
+            console.log(`🎮 [GAME] Game started - loading first question in ${language}`)
+            setTimeout(() => {
+              loadQuestion(language)
+            }, 1000)
+          }
+        }
+      }
     })
 
     newSocket.on("cooperation-challenge", ({ challenge }: { challenge: CooperationChallenge }) => {
@@ -339,7 +468,6 @@ export default function RoomPage() {
         console.log(`  - English: ${data.question.english}`)
         console.log(`  - Correct Answer: ${data.question.correctAnswer}`)
         console.log(`  - Options: ${data.question.options.join(', ')}`)
-        setCurrentQuestion(data.question)
         return data.question
       } else {
         throw new Error('Invalid question data received')
@@ -469,18 +597,6 @@ export default function RoomPage() {
         setError(response.error)
       } else {
         console.log(`✅ [DEBUG] Game started successfully`)
-        
-        // Debug question loading after game start
-        if (room?.game_mode === "practice" || room?.game_mode === "competition") {
-          const language = room.game_mode === "practice" 
-            ? currentPlayer?.language 
-            : room.host_language
-          
-          if (language) {
-            console.log(`🔍 [DEBUG] Loading initial question for ${room.game_mode} mode`)
-            debugQuestionLoading(room.game_mode, language)
-          }
-        }
       }
     })
   }
@@ -488,6 +604,15 @@ export default function RoomPage() {
   // Handle restart
   const handleRestart = () => {
     if (!socket || !isCurrentPlayerHost) return
+
+    // Clear current question state
+    setCurrentQuestion(null)
+    setSelectedAnswer("")
+    setTimeLeft(10)
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
 
     socket.emit("restart", { roomId, playerId }, (response: any) => {
       if (response.error) {
@@ -681,6 +806,7 @@ export default function RoomPage() {
                 <p>Current Player: {currentPlayer?.name || 'Not found'}</p>
                 <p>Is Host: {isCurrentPlayerHost ? 'Yes' : 'No'}</p>
                 <p>Game Mode: {room.game_mode || 'Not set'}</p>
+                <p>Current Question: {currentQuestion ? 'Loaded' : 'None'}</p>
                 <p>Question Loading: {questionLoadingError ? 'Error' : 'OK'}</p>
               </div>
             </CardContent>
@@ -1034,7 +1160,151 @@ export default function RoomPage() {
           </div>
         )}
 
-        {/* Cooperation Mode Gameplay (No Rules Display) */}
+        {/* Practice/Competition Mode Gameplay */}
+        {room.game_state === "playing" && (room.game_mode === "practice" || room.game_mode === "competition") && (
+          <div className="mobile-spacing-md">
+            {/* Game Stats */}
+            <Card className="mobile-card">
+              <CardContent className="mobile-padding">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="text-center">
+                      <div className="mobile-text-2xl font-bold text-blue-600">
+                        {currentPlayer?.score || 0}
+                      </div>
+                      <div className="mobile-text-sm text-gray-600">Your Score</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="mobile-text-2xl font-bold text-green-600">
+                        {room.target_score}
+                      </div>
+                      <div className="mobile-text-sm text-gray-600">Target</div>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className={
+                    room.game_mode === "practice" 
+                      ? "bg-blue-50 text-blue-700 border-blue-200"
+                      : "bg-orange-50 text-orange-700 border-orange-200"
+                  }>
+                    {room.game_mode === "practice" ? (
+                      <>
+                        <BookOpen className="h-3 w-3 mr-1" />
+                        Practice
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="h-3 w-3 mr-1" />
+                        Competition
+                      </>
+                    )}
+                  </Badge>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Question Display */}
+            {isLoadingQuestion ? (
+              <Card className="mobile-card">
+                <CardContent className="flex flex-col items-center justify-center p-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
+                  <h3 className="mobile-text-lg font-semibold mb-2">Loading Question...</h3>
+                  <p className="text-gray-600 text-center">Please wait while we prepare your next question.</p>
+                </CardContent>
+              </Card>
+            ) : currentQuestion ? (
+              <Card className="mobile-card">
+                <CardHeader className="mobile-padding">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="mobile-text-lg">
+                      Translate: "{currentQuestion.english}"
+                    </CardTitle>
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-gray-500" />
+                      <span className={`font-bold ${timeLeft <= 3 ? 'text-red-600' : 'text-gray-700'}`}>
+                        {timeLeft}s
+                      </span>
+                    </div>
+                  </div>
+                  <Progress value={(timeLeft / 10) * 100} className="mt-2" />
+                </CardHeader>
+                <CardContent className="mobile-spacing-md mobile-padding">
+                  <div className="grid grid-cols-1 gap-3">
+                    {currentQuestion.options.map((option, index) => (
+                      <SoundButton
+                        key={index}
+                        onClick={() => {
+                          setSelectedAnswer(option)
+                          handleAnswerSubmit(option, currentQuestion.correctAnswer, room.game_mode === "practice")
+                        }}
+                        variant={selectedAnswer === option ? "default" : "outline"}
+                        disabled={isAnswering || timeLeft <= 0}
+                        className="mobile-btn-lg w-full justify-start text-left"
+                      >
+                        <span className="font-medium mr-2">{String.fromCharCode(65 + index)}.</span>
+                        {option}
+                      </SoundButton>
+                    ))}
+                  </div>
+                  
+                  {isAnswering && (
+                    <div className="mt-4 text-center">
+                      <Loader2 className="h-5 w-5 animate-spin inline mr-2" />
+                      <span className="text-gray-600">Processing answer...</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="mobile-card">
+                <CardContent className="flex flex-col items-center justify-center p-8">
+                  <Timer className="h-12 w-12 text-gray-400 mb-4" />
+                  <h3 className="mobile-text-lg font-semibold mb-2">Waiting for Question</h3>
+                  <p className="text-gray-600 text-center">Your next question will appear here.</p>
+                  {questionLoadingError && (
+                    <div className="mt-4 p-3 bg-red-50 rounded-lg border border-red-200 w-full">
+                      <p className="text-red-700 text-center text-sm">{questionLoadingError}</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Leaderboard */}
+            <Card className="mobile-card">
+              <CardHeader className="mobile-padding">
+                <CardTitle className="flex items-center gap-2 mobile-text-lg">
+                  <Trophy className="h-5 w-5" />
+                  Leaderboard
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="mobile-spacing-sm mobile-padding">
+                {room.players
+                  .sort((a, b) => b.score - a.score)
+                  .map((player, index) => (
+                    <div
+                      key={player.id}
+                      className="flex items-center justify-between p-3 border rounded-lg"
+                    >
+                      <div className="flex items-center gap-3">
+                        {index === 0 && (
+                          <Trophy className="h-4 w-4 text-yellow-600" />
+                        )}
+                        <span className="font-medium mobile-text-base">{player.name}</span>
+                        {player.id === playerId && (
+                          <Badge variant="outline" className="text-xs">You</Badge>
+                        )}
+                      </div>
+                      <Badge variant="outline" className="mobile-text-sm">
+                        {player.score} points
+                      </Badge>
+                    </div>
+                  ))}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Cooperation Mode Gameplay */}
         {room.game_state === "playing" && room.game_mode === "cooperation" && (
           <div className="mobile-spacing-md">
             {/* Cooperation Stats */}
@@ -1137,7 +1407,7 @@ export default function RoomPage() {
           </div>
         )}
 
-        {/* Game Finished (No Rules Display) */}
+        {/* Game Finished */}
         {room.game_state === "finished" && (
           <div className="mobile-spacing-md">
             <Card className="mobile-card">
