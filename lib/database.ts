@@ -47,10 +47,10 @@ export interface Room {
   created_at: Date;
   question_count: number;
   target_score: number;
-  // Cooperation mode specific fields
+  // Cooperation mode specific fields with language-specific word tracking
   cooperation_lives?: number;
   cooperation_score?: number;
-  used_words?: string[];
+  used_words?: string[]; // Now stores language-specific word IDs like "word_001_french"
   current_category?: string;
   current_challenge_player?: string;
   cooperation_waiting?: boolean;
@@ -170,7 +170,7 @@ export async function initDatabase() {
       console.log(`  - ${row.column_name}: ${row.data_type}`);
     });
 
-    console.log("✅ Database initialized successfully with cooperation mode support");
+    console.log("✅ Database initialized successfully with language-specific word tracking");
   } catch (error) {
     console.error("❌ Database initialization error:", error);
     throw error;
@@ -281,10 +281,10 @@ export async function getRoom(roomId: string): Promise<Room | null> {
       created_at: room.created_at,
       question_count: room.question_count,
       target_score: room.target_score || 100,
-      // Cooperation mode fields
+      // Cooperation mode fields with language-specific word tracking
       cooperation_lives: room.cooperation_lives,
       cooperation_score: room.cooperation_score,
-      used_words: room.used_words || [],
+      used_words: room.used_words || [], // Array of language-specific word IDs
       current_category: room.current_category,
       current_challenge_player: room.current_challenge_player,
       cooperation_waiting: room.cooperation_waiting,

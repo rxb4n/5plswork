@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from "next"
 import { WORD_DATABASE, getWordsByCategory } from "../../lib/word-database"
 
-// API endpoint for validating cooperation mode answers
+// API endpoint for validating cooperation mode answers with language-specific word tracking
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -17,8 +17,6 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     if (!["french", "german", "russian", "japanese", "spanish"].includes(language)) {
       return res.status(400).json({ error: 'Invalid language' })
     }
-
-    console.log(`🔍 Validating cooperation answer: "${answer}" in ${language} for category ${categoryId}`)
 
     // Get all words in the category
     const categoryWords = getWordsByCategory(categoryId)
@@ -37,7 +35,6 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     })
 
     if (!matchingWord) {
-      console.log(`❌ Answer "${answer}" not found in category ${categoryId} for language ${language}`)
       return res.status(200).json({
         success: true,
         isCorrect: false,
@@ -47,23 +44,22 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       })
     }
 
-    // Check if the word has already been used
-    const wordId = matchingWord.id
-    const isAlreadyUsed = usedWords.includes(wordId)
+    // Create language-specific word ID for tracking
+    const languageSpecificWordId = `${matchingWord.id}_${language}`
+    
+    // Check if this specific language translation has already been used
+    const isAlreadyUsed = usedWords.includes(languageSpecificWordId)
 
     if (isAlreadyUsed) {
-      console.log(`⚠️ Word "${answer}" (${wordId}) has already been used`)
       return res.status(200).json({
         success: true,
         isCorrect: true,
         isUsed: true,
-        message: `"${answer}" has already been used. Try a different word!`,
+        message: `"${answer}" has already been used in ${language}. Try a different word!`,
         correctAnswer: matchingWord,
-        wordId: wordId
+        wordId: languageSpecificWordId
       })
     }
-
-    console.log(`✅ Correct answer: "${answer}" matches word ${wordId}`)
 
     return res.status(200).json({
       success: true,
@@ -71,7 +67,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       isUsed: false,
       message: `Correct! "${answer}" is a valid ${categoryId.replace('_', ' ')} word.`,
       correctAnswer: matchingWord,
-      wordId: wordId
+      wordId: languageSpecificWordId
     })
 
   } catch (error) {
