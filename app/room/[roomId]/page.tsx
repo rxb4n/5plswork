@@ -84,6 +84,11 @@ export default function RoomPage() {
   const [showAudioSettings, setShowAudioSettings] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
   const [connectionError, setConnectionError] = useState<string | null>(null)
+  
+  // NEW: Answer feedback state
+  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null)
+  const [showFeedback, setShowFeedback] = useState(false)
+  const [isCorrectAnswer, setIsCorrectAnswer] = useState(false)
 
   // Initialize socket and join room
   useEffect(() => {
@@ -268,6 +273,10 @@ export default function RoomPage() {
         setCurrentQuestion(data.question)
         setTimeLeft(10)
         setIsAnswering(false)
+        // Reset feedback state for new question
+        setSelectedAnswer(null)
+        setShowFeedback(false)
+        setIsCorrectAnswer(false)
       } else {
         console.error("Failed to fetch question:", response.statusText)
       }
@@ -286,16 +295,16 @@ export default function RoomPage() {
 
   // Timer countdown
   useEffect(() => {
-    if (room?.game_state === "playing" && currentQuestion && timeLeft > 0 && !isAnswering) {
+    if (room?.game_state === "playing" && currentQuestion && timeLeft > 0 && !isAnswering && !showFeedback) {
       const timer = setTimeout(() => {
         setTimeLeft(prev => prev - 1)
       }, 1000)
       return () => clearTimeout(timer)
-    } else if (timeLeft === 0 && currentQuestion && !isAnswering) {
+    } else if (timeLeft === 0 && currentQuestion && !isAnswering && !showFeedback) {
       // Time's up - submit empty answer
       handleAnswer("")
     }
-  }, [timeLeft, currentQuestion, isAnswering, room?.game_state])
+  }, [timeLeft, currentQuestion, isAnswering, room?.game_state, showFeedback])
 
   const handleLanguageChange = (language: string) => {
     if (!socket || !currentPlayer) return
@@ -345,13 +354,18 @@ export default function RoomPage() {
     })
   }
 
+  // ENHANCED: Answer handling with visual feedback
   const handleAnswer = (answer: string) => {
-    if (!socket || !currentQuestion || isAnswering) return
+    if (!socket || !currentQuestion || isAnswering || showFeedback) return
 
     setIsAnswering(true)
+    setSelectedAnswer(answer)
+    
+    // Determine if answer is correct
+    const isCorrect = answer === currentQuestion.correctAnswer
+    setIsCorrectAnswer(isCorrect)
     
     // Play sound effect based on correctness
-    const isCorrect = answer === currentQuestion.correctAnswer
     if (answer !== "") { // Don't play sounds for timeout
       if (isCorrect) {
         audio.playSuccess()
@@ -359,6 +373,9 @@ export default function RoomPage() {
         audio.playFailure()
       }
     }
+
+    // Show visual feedback immediately
+    setShowFeedback(true)
 
     socket.emit("answer", {
       roomId,
@@ -372,15 +389,51 @@ export default function RoomPage() {
       if (response.error) {
         setError(response.error)
         setIsAnswering(false)
+        setShowFeedback(false)
       } else {
-        // Fetch next question after a short delay
+        // Keep feedback visible for 2 seconds, then fetch next question
         setTimeout(() => {
+          setShowFeedback(false)
+          setIsAnswering(false)
+          setSelectedAnswer(null)
+          
+          // Fetch next question if game is still playing
           if (currentPlayer?.language && room?.game_state === "playing") {
             fetchNewQuestion(currentPlayer.language)
           }
-        }, 1500)
+        }, 2000) // 2 seconds to see the feedback
       }
     })
+  }
+
+  // Helper function to get button styling based on answer state
+  const getAnswerButtonStyle = (option: string) => {
+    if (!showFeedback) {
+      return "outline" // Default style when no feedback
+    }
+    
+    if (option === currentQuestion?.correctAnswer) {
+      // Always highlight correct answer in green
+      return "default"
+    } else if (option === selectedAnswer && !isCorrectAnswer) {
+      // Highlight selected wrong answer in red
+      return "destructive"
+    } else {
+      // Other options remain neutral
+      return "outline"
+    }
+  }
+
+  // Helper function to get button classes for additional styling
+  const getAnswerButtonClasses = (option: string) => {
+    if (!showFeedback) return ""
+    
+    if (option === currentQuestion?.correctAnswer) {
+      return "bg-green-500 hover:bg-green-600 text-white border-green-500"
+    } else if (option === selectedAnswer && !isCorrectAnswer) {
+      return "bg-red-500 hover:bg-red-600 text-white border-red-500"
+    }
+    return ""
   }
 
   const handleRestart = () => {
@@ -393,6 +446,9 @@ export default function RoomPage() {
         setCurrentQuestion(null)
         setTimeLeft(10)
         setIsAnswering(false)
+        setSelectedAnswer(null)
+        setShowFeedback(false)
+        setIsCorrectAnswer(false)
       }
     })
   }
@@ -642,23 +698,43 @@ export default function RoomPage() {
                   {/* Timer Progress */}
                   <Progress value={(timeLeft / 10) * 100} className="h-2" />
 
-                  {/* Answer Options */}
+                  {/* Answer Options with Enhanced Visual Feedback */}
                   <div className="grid grid-cols-2 gap-3">
                     {currentQuestion.options.map((option, index) => (
-                      <SoundButton
+                      <Button
                         key={index}
                         onClick={() => handleAnswer(option)}
-                        disabled={isAnswering || timeLeft === 0 || connectionStatus !== 'connected'}
-                        variant="outline"
-                        className="h-16 text-lg"
-                        playSound={false} // We handle sounds manually for answers
+                        disabled={isAnswering || timeLeft === 0 || connectionStatus !== 'connected' || showFeedback}
+                        variant={getAnswerButtonStyle(option)}
+                        className={`h-16 text-lg transition-all duration-300 ${getAnswerButtonClasses(option)}`}
                       >
                         {option}
-                      </SoundButton>
+                      </Button>
                     ))}
                   </div>
 
-                  {isAnswering && (
+                  {/* Feedback Display */}
+                  {showFeedback && (
+                    <div className="text-center">
+                      {isCorrectAnswer ? (
+                        <div className="flex items-center justify-center gap-2 text-green-600">
+                          <CheckCircle className="h-6 w-6" />
+                          <span className="text-xl font-bold">Correct! 🎉</span>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-center gap-2 text-red-600">
+                            <span className="text-xl font-bold">❌ Incorrect</span>
+                          </div>
+                          <p className="text-gray-600">
+                            Correct answer: <span className="font-bold text-green-600">{currentQuestion.correctAnswer}</span>
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {isAnswering && !showFeedback && (
                     <div className="text-center text-gray-600">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
                       Processing answer...
