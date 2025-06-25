@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import { useState, useEffect, useRef, useCallback } from "react"
+import React, { useState, useEffect, useRef, useCallback } from "react"
 import { useParams, useSearchParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { SoundButton } from "@/components/ui/sound-button"
@@ -125,9 +125,11 @@ export default function RoomPage() {
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(false)
   const [showAnswerFeedback, setShowAnswerFeedback] = useState(false)
   const [lastAnswerCorrect, setLastAnswerCorrect] = useState<boolean | null>(null)
+  const [isWaitingForNextQuestion, setIsWaitingForNextQuestion] = useState(false)
 
   // Cooperation mode state
   const [cooperationChallenge, setCooperationChallenge] = useState<CooperationChallenge | null>(null)
+  const [pendingChallenge, setPendingChallenge] = useState<CooperationChallenge | null>(null)
   const [cooperationAnswer, setCooperationAnswer] = useState("")
   const [cooperationTyping, setCooperationTyping] = useState<{ playerId: string; text: string } | null>(null)
   const [isCooperationWaiting, setIsCooperationWaiting] = useState(false)
@@ -240,34 +242,28 @@ export default function RoomPage() {
     newSocket.on("room-update", ({ room: updatedRoom }: { room: Room }) => {
       console.log(`[DEBUG] room-update at ${new Date().toISOString()}`, updatedRoom)
       setRoom(updatedRoom)
+      // Process any pending cooperation challenge
+      if (pendingChallenge && updatedRoom.current_challenge_player) {
+        console.log("[DEBUG] Processing pending challenge with updated room")
+        processCooperationChallenge(pendingChallenge, updatedRoom)
+        setPendingChallenge(null)
+      }
     })
 
     newSocket.on("cooperation-challenge", ({ challenge }: { challenge: CooperationChallenge }) => {
+      console.log("[DEBUG] Cooperation challenge received:", challenge)
       if (!room) {
-        console.warn("[DEBUG] Room state not ready, skipping challenge")
+        console.log("[DEBUG] Room state not ready, buffering challenge")
+        setPendingChallenge(challenge)
         return
       }
-      if (!challenge || !challenge.challengeId || !challenge.language) {
-        console.error("[DEBUG] Invalid cooperation challenge received:", challenge)
-        setError("Invalid challenge received")
-        return
-      }
-      console.log("🤝 Cooperation challenge received:", challenge)
-      setCooperationChallenge(challenge)
-      setIsCooperationWaiting(false)
-      setCooperationAnswer("")
-      setCooperationTyping(null)
-      
-      if (challenge && room.current_challenge_player === playerId) {
-        console.log("[DEBUG] Starting cooperation timer for current player", playerId)
-        startCooperationTimer()
-      }
+      processCooperationChallenge(challenge, room)
     })
 
     newSocket.on("cooperation-waiting", ({ isWaiting }: { isWaiting: boolean }) => {
       console.log("[DEBUG] Cooperation waiting state:", isWaiting)
-      setIsCooperationWaiting(isWaiting)
-      if (isWaiting && room?.current_challenge_player !== playerId) {
+      if (isWaiting && !cooperationChallenge) {
+        setIsCooperationWaiting(isWaiting)
         setCooperationChallenge(null)
         setCooperationAnswer("")
         setCooperationTyping(null)
@@ -334,6 +330,25 @@ export default function RoomPage() {
     }
   }, [roomId, playerId, playerName, isHost, router])
 
+  // Process cooperation challenge
+  const processCooperationChallenge = (challenge: CooperationChallenge, gameRoom: Room) => {
+    if (!challenge || !challenge.challengeId || !challenge.language) {
+      console.error("[DEBUG] Invalid cooperation challenge received:", challenge)
+      setError("Invalid challenge received")
+      return
+    }
+    console.log("🤝 Processing cooperation challenge:", challenge)
+    setCooperationChallenge(challenge)
+    setIsCooperationWaiting(false)
+    setCooperationAnswer("")
+    setCooperationTyping(null)
+    
+    if (challenge && gameRoom.current_challenge_player === playerId) {
+      console.log("[DEBUG] Starting cooperation timer for current player", playerId)
+      startCooperationTimer()
+    }
+  }
+
   // Handle page unload
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -356,17 +371,19 @@ export default function RoomPage() {
       !currentQuestion &&
       !isLoadingQuestion &&
       !isAnswering &&
-      !showAnswerFeedback
+      !showAnswerFeedback &&
+      !isWaitingForNextQuestion
     ) {
       console.log("[DEBUG] Loading initial question on game start")
+      setIsWaitingForNextQuestion(true)
       debounceLoadQuestion(room)
     }
-  }, [room?.game_state, room?.game_mode, currentQuestion, isLoadingQuestion, isAnswering, showAnswerFeedback, debounceLoadQuestion])
+  }, [room?.game_state, room?.game_mode, currentQuestion, isLoadingQuestion, isAnswering, showAnswerFeedback, isWaitingForNextQuestion, debounceLoadQuestion])
 
   // Load question function
   const loadQuestion = async (gameRoom: Room) => {
-    console.log(`[DEBUG] loadQuestion called at ${new Date().toISOString()} for mode ${gameRoom.game_mode}, isAnswering=${isAnswering}, showAnswerFeedback=${showAnswerFeedback}`)
-    if (isLoadingQuestion || isAnswering || showAnswerFeedback) {
+    console.log(`[DEBUG] loadQuestion called at ${new Date().toISOString()} for mode ${gameRoom.game_mode}, isAnswering=${isAnswering}, showAnswerFeedback=${showAnswerFeedback}, isWaitingForNextQuestion=${isWaitingForNextQuestion}`)
+    if (isLoadingQuestion || isAnswering || showAnswerFeedback || !isWaitingForNextQuestion) {
       console.log("[DEBUG] loadQuestion blocked")
       return
     }
@@ -414,6 +431,7 @@ export default function RoomPage() {
         setQuestionStartTime(Date.now())
         setShowAnswerFeedback(false)
         setLastAnswerCorrect(null)
+        setIsWaitingForNextQuestion(false)
         
         if (timerRef.current) clearInterval(timerRef.current)
         
@@ -433,6 +451,7 @@ export default function RoomPage() {
     } catch (error) {
       console.error(`❌ Question loading failed:`, error)
       setQuestionLoadingError(`Failed to load question: ${error.message}`)
+      setIsWaitingForNextQuestion(false)
     } finally {
       setIsLoadingQuestion(false)
     }
@@ -551,11 +570,12 @@ export default function RoomPage() {
         setLastAnswerCorrect(null)
         
         if (room && (room.game_mode === "practice" || room.game_mode === "competition")) {
+          setIsWaitingForNextQuestion(true)
           setTimeout(() => {
             debounceLoadQuestion(room)
           }, 500)
         }
-      }, 2000)
+      }, 3000)
 
     } catch (error) {
       console.error("❌ Error submitting answer:", error)
@@ -563,6 +583,7 @@ export default function RoomPage() {
       setIsAnswering(false)
       setShowAnswerFeedback(false)
       setCurrentQuestion(null)
+      setIsWaitingForNextQuestion(false)
     }
   }
 
@@ -1124,7 +1145,7 @@ export default function RoomPage() {
                 <CardHeader className="mobile-padding">
                   <CardTitle className="mobile-text-lg">Game Rules</CardTitle>
                 </CardHeader>
-                <CardContent className="mobile-spacing-sm mobile-text-sm mobile-padding">
+                <CardContent className="mobile-spacing-sm mobile-padding">
                   <div className="mobile-spacing-sm">
                     <p className="font-medium mobile-text-base">🎯 Game Modes:</p>
                     <div className="mobile-spacing-sm ml-4">
@@ -1191,12 +1212,65 @@ export default function RoomPage() {
         {room.game_state === "playing" && (room.game_mode === "practice" || room.game_mode === "competition") && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
-              {isLoadingQuestion ? (
+              {isLoadingQuestion || isWaitingForNextQuestion ? (
                 <Card className="mobile-card">
                   <CardContent className="flex flex-col items-center justify-center p-8">
                     <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
                     <h3 className="mobile-text-lg font-semibold mb-2">Loading Question...</h3>
                     <p className="text-gray-600 text-center">Please wait while we prepare your next question.</p>
+                  </CardContent>
+                </Card>
+              ) : showAnswerFeedback && currentQuestion ? (
+                <Card className="mobile-card">
+                  <CardHeader className="mobile-padding">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="mobile-text-xl">Translate this word:</CardTitle>
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4 text-gray-500" />
+                        <span className={`font-bold ${timeLeft <= 3 ? 'text-red-600' : 'text-gray-700'}`}>
+                          {timeLeft}s
+                        </span>
+                      </div>
+                    </div>
+                    <CardDescription className="mobile-text-lg font-semibold text-blue-600">
+                      {currentQuestion.english}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="mobile-spacing-md mobile-padding">
+                    <div className="grid grid-cols-1 gap-3">
+                      {currentQuestion.options.map((option, index) => (
+                        <SoundButton
+                          key={index}
+                          onClick={() => handleAnswer(option)}
+                          disabled={true}
+                          className={`answer-option ${
+                            option === currentQuestion.correctAnswer
+                              ? 'correct'
+                              : option === selectedAnswer && option !== currentQuestion.correctAnswer
+                              ? 'incorrect'
+                              : ''
+                          }`}
+                          style={{ 
+                            height: '60px',
+                            width: '85%',
+                            margin: '0 auto',
+                            color: option === currentQuestion.correctAnswer || 
+                                  (option === selectedAnswer && option !== currentQuestion.correctAnswer)
+                                  ? 'white' : 'black'
+                          }}
+                        >
+                          {option}
+                        </SoundButton>
+                      ))}
+                    </div>
+                    <div className="correct-answer-display">
+                      {lastAnswerCorrect ? (
+                        <span>✅ Correct! Well done!</span>
+                      ) : (
+                        <span>❌ Incorrect. The correct answer was: <strong>{currentQuestion.correctAnswer}</strong></span>
+                      )}
+                    </div>
+                    <Progress value={(10 - timeLeft) * 10} className="w-full mt-4" />
                   </CardContent>
                 </Card>
               ) : currentQuestion ? (
