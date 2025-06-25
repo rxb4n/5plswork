@@ -542,19 +542,19 @@ export default function RoomPage() {
       }
     })
     
-    // Reset for next question after delay
-    setTimeout(() => {
-      setCurrentQuestion(null)
-      setSelectedAnswer("")
-      setAnswerFeedback(null)
-      setIsAnswering(false)
-      
-      // Load next question if still playing
-      if (room?.game_state === "playing") {
-        loadQuestion(room)
-      }
-    }, 0)
-  }
+  // Show feedback for 2000ms, then reset and load next question
+  setTimeout(() => {
+    // Reset for next question
+    setCurrentQuestion(null)
+    setSelectedAnswer("")
+    setAnswerFeedback(null)
+    setIsAnswering(false)
+    
+    // Load next question if still playing
+    if (room?.game_state === "playing") {
+      loadQuestion(room)
+    }
+  }, 2000) // Changed from 0 to 2000 to show feedback for 2 seconds
 
   // Handle language selection
   const handleLanguageChange = (language: string) => {
