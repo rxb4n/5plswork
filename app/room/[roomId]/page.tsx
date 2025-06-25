@@ -1,79 +1,80 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { useParams, useSearchParams, useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { SoundButton } from "@/components/ui/sound-button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Progress } from "@/components/ui/progress"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { AudioSettings } from "@/components/audio-settings"
 import { 
+  ArrowLeft, 
   Users, 
   Settings, 
+  Volume2, 
   Crown, 
-  Play, 
-  RotateCcw, 
-  LogOut, 
+  Trophy, 
   Clock, 
-  Trophy,
-  BookOpen,
-  Zap,
-  Globe,
+  Target, 
+  Zap, 
+  BookOpen, 
   Heart as HandHeart,
+  Globe,
+  Gamepad2,
+  CheckCircle,
+  XCircle,
   Timer,
-  Target,
-  Loader2,
-  Check,
-  X
+  RotateCcw
 } from "lucide-react"
 import { io, Socket } from "socket.io-client"
 import { useAudio } from "@/lib/audio"
 
 interface Question {
-  questionId: string;
-  english: string;
-  correctAnswer: string;
-  options: string[];
+  questionId: string
+  english: string
+  correctAnswer: string
+  options: string[]
 }
 
 interface Player {
-  id: string;
-  name: string;
-  language: "french" | "german" | "russian" | "japanese" | "spanish" | null;
-  ready: boolean;
-  score: number;
-  is_host: boolean;
-  current_question: Question | null;
-  last_seen: Date;
-}
-
-interface Room {
-  id: string;
-  players: Player[];
-  game_state: "lobby" | "playing" | "finished";
-  game_mode: "practice" | "competition" | "cooperation" | null;
-  host_language: "french" | "german" | "russian" | "japanese" | "spanish" | null;
-  winner_id?: string;
-  last_activity: Date;
-  created_at: Date;
-  question_count: number;
-  target_score: number;
-  cooperation_lives?: number;
-  cooperation_score?: number;
-  used_words?: string[];
-  current_category?: string;
-  current_challenge_player?: string;
-  cooperation_waiting?: boolean;
+  id: string
+  name: string
+  language: "french" | "german" | "russian" | "japanese" | "spanish" | null
+  ready: boolean
+  score: number
+  is_host: boolean
+  current_question: Question | null
+  last_seen: Date
 }
 
 interface CooperationChallenge {
-  categoryId: string;
-  categoryName: string;
-  englishName: string;
-  language: string;
-  challengeId: string;
+  categoryId: string
+  categoryName: string
+  englishName: string
+  language: string
+  challengeId: string
+}
+
+interface Room {
+  id: string
+  players: Player[]
+  game_state: "lobby" | "playing" | "finished"
+  game_mode: "practice" | "competition" | "cooperation" | null
+  host_language: "french" | "german" | "russian" | "japanese" | "spanish" | null
+  winner_id?: string
+  last_activity: Date
+  created_at: Date
+  question_count: number
+  target_score: number
+  cooperation_lives?: number
+  cooperation_score?: number
+  used_words?: string[]
+  current_category?: string
+  current_challenge_player?: string
+  cooperation_waiting?: boolean
 }
 
 const LANGUAGES = [
@@ -84,70 +85,63 @@ const LANGUAGES = [
   { value: "spanish", label: "🇪🇸 Spanish" },
 ] as const
 
-const TARGET_SCORES = [100, 250, 500] as const
-
 export default function RoomPage() {
-  const params = useParams()
-  const searchParams = useSearchParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const audio = useAudio()
   
-  // Extract parameters from URL
-  const roomId = params.roomId as string
-  const playerId = searchParams.get('playerId')
-  const playerName = searchParams.get('name')
-  const isHost = searchParams.get('isHost') === 'true'
+  // URL parameters
+  const roomId = searchParams.get("roomId") || ""
+  const playerId = searchParams.get("playerId") || ""
+  const playerName = searchParams.get("name") || ""
+  const isHost = searchParams.get("isHost") === "true"
 
-  // Validate required parameters
-  useEffect(() => {
-    if (!roomId || !playerId || !playerName) {
-      console.error('❌ Missing required parameters:', { roomId, playerId, playerName })
-      alert('Missing required parameters. Redirecting to home page.')
-      router.push('/')
-      return
-    }
-  }, [roomId, playerId, playerName, router])
-
+  // Socket and connection state
   const [socket, setSocket] = useState<Socket | null>(null)
+  const [isConnected, setIsConnected] = useState(false)
+  const [connectionError, setConnectionError] = useState<string | null>(null)
+
+  // Room and game state
   const [room, setRoom] = useState<Room | null>(null)
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Game state
+  // Question and answer state
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
-  const [selectedAnswer, setSelectedAnswer] = useState<string>("")
-  const [timeLeft, setTimeLeft] = useState(10)
+  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null)
   const [isAnswering, setIsAnswering] = useState(false)
-  const [questionStartTime, setQuestionStartTime] = useState<number>(0)
-  const [questionLoadingError, setQuestionLoadingError] = useState<string | null>(null)
-  const [isLoadingQuestion, setIsLoadingQuestion] = useState(false)
-  const [answerFeedback, setAnswerFeedback] = useState<{
-    show: boolean;
-    isCorrect: boolean;
-    correctAnswer: string;
-    selectedAnswer: string;
-  } | null>(null)
+  const [showAnswerFeedback, setShowAnswerFeedback] = useState(false)
+  const [lastAnswerCorrect, setLastAnswerCorrect] = useState<boolean | null>(null)
+  const [questionTimer, setQuestionTimer] = useState(10)
+  const [isQuestionTimerActive, setIsQuestionTimerActive] = useState(false)
 
   // Cooperation mode state
   const [cooperationChallenge, setCooperationChallenge] = useState<CooperationChallenge | null>(null)
   const [cooperationAnswer, setCooperationAnswer] = useState("")
-  const [cooperationTyping, setCooperationTyping] = useState<{ playerId: string; text: string } | null>(null)
-  const [isCooperationWaiting, setIsCooperationWaiting] = useState(false)
   const [cooperationCountdown, setCooperationCountdown] = useState(5)
   const [cooperationTimerActive, setCooperationTimerActive] = useState(false)
+  const [isCooperationWaiting, setIsCooperationWaiting] = useState(false)
+  const [cooperationTyping, setCooperationTyping] = useState<{ playerId: string; text: string } | null>(null)
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null)
-  const activityPingRef = useRef<NodeJS.Timeout | null>(null)
-  const questionUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  // UI state
+  const [showAudioSettings, setShowAudioSettings] = useState(false)
+  const [isJoining, setIsJoining] = useState(false)
+
+  // Refs for timers
+  const questionTimerRef = useRef<NodeJS.Timeout | null>(null)
   const cooperationTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const activityPingRef = useRef<NodeJS.Timeout | null>(null)
+  const questionLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Initialize socket connection
   useEffect(() => {
-    if (!roomId || !playerId || !playerName) return
+    if (!roomId || !playerId) {
+      setError("Missing room ID or player ID")
+      setIsLoading(false)
+      return
+    }
 
     console.log("🔌 Initializing Socket.IO connection for room...")
-    console.log("📋 Room parameters:", { roomId, playerId, playerName, isHost })
     
     const newSocket = io({
       path: "/api/socketio",
@@ -165,89 +159,56 @@ export default function RoomPage() {
 
     newSocket.on("connect", () => {
       console.log("✅ Connected to server successfully")
-      console.log("  - Socket ID:", newSocket.id)
-      setConnectionStatus('connected')
-      setError(null)
+      setIsConnected(true)
+      setConnectionError(null)
       
-      // Join or create room with proper error handling
-      if (isHost) {
-        console.log(`🏠 Creating room ${roomId} as host`)
-        newSocket.emit("create-room", { 
-          roomId, 
-          playerId, 
-          data: { targetScore: 100 } 
-        }, (response: any) => {
-          console.log("📡 Create room response:", response)
-          if (response.error) {
-            console.error("❌ Failed to create room:", response.error)
-            setError(response.error)
-            setIsLoading(false)
-          } else {
-            console.log("✅ Room created successfully:", response.room)
-            setRoom(response.room)
-            
-            // Now add the host player to the room
-            newSocket.emit("join-room", { 
-              roomId, 
-              playerId, 
-              data: { name: decodeURIComponent(playerName), isHost: true } 
-            }, (joinResponse: any) => {
-              console.log("📡 Join room response:", joinResponse)
-              if (joinResponse.error) {
-                console.error("❌ Failed to join created room:", joinResponse.error)
-                setError(joinResponse.error)
-              } else {
-                console.log("✅ Host joined room successfully:", joinResponse.room)
-                setRoom(joinResponse.room)
-              }
-              setIsLoading(false)
-            })
-          }
-        })
-      } else {
-        console.log(`👤 Joining room ${roomId}`)
-        newSocket.emit("join-room", { 
-          roomId, 
-          playerId, 
-          data: { name: decodeURIComponent(playerName), isHost: false } 
-        }, (response: any) => {
-          console.log("📡 Join room response:", response)
-          if (response.error) {
-            console.error("❌ Failed to join room:", response.error)
-            setError(response.error)
-            setIsLoading(false)
-          } else {
-            console.log("✅ Joined room successfully:", response.room)
-            setRoom(response.room)
-            setIsLoading(false)
-          }
-        })
-      }
+      // Join the room
+      setIsJoining(true)
+      newSocket.emit("join-room", {
+        roomId,
+        playerId,
+        data: { name: playerName, isHost }
+      }, (response: any) => {
+        setIsJoining(false)
+        if (response.error) {
+          console.error("❌ Failed to join room:", response.error)
+          setError(response.error)
+        } else {
+          console.log("✅ Successfully joined room:", response.room)
+          setRoom(response.room)
+        }
+        setIsLoading(false)
+      })
     })
 
     newSocket.on("connect_error", (error) => {
       console.error("❌ Connection error:", error)
-      setConnectionStatus('error')
-      setError(`Connection failed: ${error.message}`)
+      setIsConnected(false)
+      setConnectionError(`Connection failed: ${error.message}`)
       setIsLoading(false)
+    })
+
+    newSocket.on("disconnect", (reason) => {
+      console.log("🔌 Disconnected from server, reason:", reason)
+      setIsConnected(false)
     })
 
     newSocket.on("room-update", ({ room: updatedRoom }: { room: Room }) => {
       console.log("📡 Room updated:", updatedRoom)
       setRoom(updatedRoom)
       
-      // FIXED: Single question loading trigger with proper debouncing
+      // FIXED: Only load question if we don't have one and game is playing
       if (updatedRoom.game_state === "playing" && 
           (updatedRoom.game_mode === "practice" || updatedRoom.game_mode === "competition") &&
-          !currentQuestion && !isLoadingQuestion) {
+          !currentQuestion && !showAnswerFeedback && !isAnswering) {
         
-        // Clear any existing timeout to prevent duplicates
-        if (questionUpdateTimeoutRef.current) {
-          clearTimeout(questionUpdateTimeoutRef.current)
+        // Clear any existing timeout
+        if (questionLoadTimeoutRef.current) {
+          clearTimeout(questionLoadTimeoutRef.current)
         }
         
-        // Debounce question loading by 300ms
-        questionUpdateTimeoutRef.current = setTimeout(() => {
+        // Add debounce to prevent duplicate loads
+        questionLoadTimeoutRef.current = setTimeout(() => {
           loadQuestion(updatedRoom)
         }, 300)
       }
@@ -260,8 +221,9 @@ export default function RoomPage() {
       setCooperationAnswer("")
       setCooperationTyping(null)
       
-      // Start cooperation timer when challenge is received
-      if (room?.current_challenge_player === playerId) {
+      // FIXED: Start timer immediately when challenge is received
+      if (challenge && room?.current_challenge_player === playerId) {
+        console.log("🕐 Starting cooperation timer for current player")
         startCooperationTimer()
       }
     })
@@ -280,160 +242,212 @@ export default function RoomPage() {
     newSocket.on("cooperation-typing", ({ playerId: typingPlayerId, text }: { playerId: string; text: string }) => {
       if (typingPlayerId !== playerId) {
         setCooperationTyping({ playerId: typingPlayerId, text })
-      }
-    })
-
-    newSocket.on("host-left", () => {
-      console.log("🚨 Host left the room")
-      setError("Host left the room. Redirecting to home page...")
-      setTimeout(() => {
-        router.push('/')
-      }, 2000)
-    })
-
-    newSocket.on("error", (errorData: any) => {
-      console.error("❌ Socket error:", errorData)
-      setError(errorData.message || "An error occurred")
-      if (errorData.status === 404) {
+        
+        // Clear typing indicator after 2 seconds of no updates
         setTimeout(() => {
-          router.push('/')
+          setCooperationTyping(null)
         }, 2000)
       }
     })
 
-    newSocket.on("disconnect", (reason) => {
-      console.log("🔌 Disconnected from server, reason:", reason)
-      setConnectionStatus('connecting')
+    newSocket.on("host-left", () => {
+      setError("The host has left the room")
+      setTimeout(() => {
+        router.push("/")
+      }, 3000)
     })
 
-    newSocket.on("reconnect", (attemptNumber) => {
-      console.log("🔄 Reconnected after", attemptNumber, "attempts")
-      setConnectionStatus('connected')
-      setError(null)
+    newSocket.on("room-closed", (data) => {
+      console.log("🚪 Room closed:", data)
+      setError(`Room closed: ${data.message}`)
+      setTimeout(() => {
+        router.push("/")
+      }, 3000)
+    })
+
+    newSocket.on("error", (error) => {
+      console.error("❌ Socket error:", error)
+      setError(error.message || "An error occurred")
+      if (error.status === 404) {
+        setTimeout(() => {
+          router.push("/")
+        }, 3000)
+      }
     })
 
     setSocket(newSocket)
 
-    // Set up activity ping
-    activityPingRef.current = setInterval(() => {
-      if (newSocket.connected) {
-        newSocket.emit("room-activity-ping", { roomId, playerId })
-      }
-    }, 30000) // Ping every 30 seconds
-
     return () => {
       console.log("🔌 Cleaning up socket connection...")
-      if (activityPingRef.current) {
-        clearInterval(activityPingRef.current)
-      }
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-      }
-      if (questionUpdateTimeoutRef.current) {
-        clearTimeout(questionUpdateTimeoutRef.current)
-      }
-      if (cooperationTimerRef.current) {
-        clearInterval(cooperationTimerRef.current)
-      }
+      if (activityPingRef.current) clearInterval(activityPingRef.current)
+      if (questionTimerRef.current) clearTimeout(questionTimerRef.current)
+      if (cooperationTimerRef.current) clearInterval(cooperationTimerRef.current)
+      if (questionLoadTimeoutRef.current) clearTimeout(questionLoadTimeoutRef.current)
       newSocket.close()
     }
   }, [roomId, playerId, playerName, isHost, router])
 
-  // Handle page unload
+  // Activity ping to keep room alive
   useEffect(() => {
-    const handleBeforeUnload = () => {
-      if (socket && playerId) {
-        socket.emit("leave-room", { roomId, playerId })
+    if (socket && isConnected && room) {
+      activityPingRef.current = setInterval(() => {
+        socket.emit("room-activity-ping", { roomId, playerId })
+      }, 30000) // Ping every 30 seconds
+
+      return () => {
+        if (activityPingRef.current) {
+          clearInterval(activityPingRef.current)
+        }
       }
     }
+  }, [socket, isConnected, room, roomId, playerId])
 
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload)
-    }
-  }, [socket, roomId, playerId])
-
-  // FIXED: Enhanced question loading with proper language detection
+  // Load question for practice/competition modes
   const loadQuestion = async (currentRoom: Room) => {
-    if (isLoadingQuestion) {
-      console.log("⏳ Question already loading, skipping...")
-      return
-    }
+    if (!currentRoom || currentRoom.game_state !== "playing") return
+    if (currentRoom.game_mode !== "practice" && currentRoom.game_mode !== "competition") return
+    if (showAnswerFeedback || isAnswering) return // FIXED: Don't load if showing feedback
 
-    setIsLoadingQuestion(true)
-    setQuestionLoadingError(null)
-    
-    try {
-      let language: string | null = null
-      
-      if (currentRoom.game_mode === "practice") {
-        const currentPlayer = currentRoom.players.find(p => p.id === playerId)
-        language = currentPlayer?.language || null
-        console.log(`🎯 Loading question for practice mode in ${language}`)
-      } else if (currentRoom.game_mode === "competition") {
-        language = currentRoom.host_language
-        console.log(`🎯 Loading question for competition mode in ${language}`)
-      }
+    const currentPlayer = currentRoom.players.find(p => p.id === playerId)
+    if (!currentPlayer) return
 
-      if (!language) {
+    let targetLanguage: string
+    if (currentRoom.game_mode === "practice") {
+      if (!currentPlayer.language) {
         console.error("❌ No language available for question loading")
-        setQuestionLoadingError("No language selected")
         return
       }
+      targetLanguage = currentPlayer.language
+    } else {
+      if (!currentRoom.host_language) {
+        console.error("❌ No host language available for question loading")
+        return
+      }
+      targetLanguage = currentRoom.host_language
+    }
 
-      const response = await fetch('/api/get-question', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language })
+    try {
+      console.log(`🎯 Loading question for ${currentRoom.game_mode} mode in ${targetLanguage}`)
+      
+      const response = await fetch("/api/get-question", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ language: targetLanguage }),
       })
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        throw new Error(`Failed to fetch question: ${response.status}`)
       }
 
       const data = await response.json()
-      
       if (data.success && data.question) {
-        console.log(`✅ Question loaded successfully:`, data.question)
+        console.log("✅ Question loaded successfully:", data.question)
         setCurrentQuestion(data.question)
-        setSelectedAnswer("")
-        setAnswerFeedback(null)
-        setTimeLeft(10)
-        setQuestionStartTime(Date.now())
-        
-        // Start timer for practice/competition modes
-        if (timerRef.current) {
-          clearInterval(timerRef.current)
-        }
-        
-        timerRef.current = setInterval(() => {
-          setTimeLeft(prev => {
-            if (prev <= 1) {
-              clearInterval(timerRef.current!)
-              // Auto-submit when time runs out
-              handleAnswerSubmit("", true)
-              return 0
-            }
-            return prev - 1
-          })
-        }, 1000)
+        setSelectedAnswer(null)
+        setIsAnswering(false)
+        startQuestionTimer()
       } else {
-        throw new Error('Invalid question data received')
+        throw new Error(data.error || "Failed to load question")
       }
     } catch (error) {
-      console.error(`❌ Question loading failed:`, error)
-      setQuestionLoadingError(`Failed to load question: ${error.message}`)
-    } finally {
-      setIsLoadingQuestion(false)
+      console.error("❌ Error loading question:", error)
+      setError("Failed to load question")
     }
   }
 
-  // FIXED: Cooperation timer with proper functionality
+  // Start question timer
+  const startQuestionTimer = () => {
+    setQuestionTimer(10)
+    setIsQuestionTimerActive(true)
+    
+    if (questionTimerRef.current) {
+      clearInterval(questionTimerRef.current)
+    }
+    
+    questionTimerRef.current = setInterval(() => {
+      setQuestionTimer(prev => {
+        if (prev <= 1) {
+          clearInterval(questionTimerRef.current!)
+          setIsQuestionTimerActive(false)
+          handleAnswer("", true) // Handle timeout
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+  }
+
+  // Stop question timer
+  const stopQuestionTimer = () => {
+    if (questionTimerRef.current) {
+      clearInterval(questionTimerRef.current)
+      questionTimerRef.current = null
+    }
+    setIsQuestionTimerActive(false)
+  }
+
+  // Handle answer submission
+  const handleAnswer = async (answer: string, isTimeout: boolean = false) => {
+    if (!currentQuestion || !room || isAnswering) return
+
+    setIsAnswering(true)
+    stopQuestionTimer()
+
+    const isCorrect = answer === currentQuestion.correctAnswer
+    const timeLeft = questionTimer
+    const isPracticeMode = room.game_mode === "practice"
+
+    // Show feedback immediately
+    setLastAnswerCorrect(isCorrect)
+    setShowAnswerFeedback(true)
+    setSelectedAnswer(answer)
+
+    // Play appropriate sound
+    if (isCorrect) {
+      audio.playSuccess()
+    } else {
+      audio.playFailure()
+    }
+
+    // Submit answer to server without triggering room update
+    if (socket) {
+      socket.emit("answer", {
+        roomId,
+        playerId,
+        data: { answer, timeLeft, correctAnswer: currentQuestion.correctAnswer, isPracticeMode }
+      }, (response: any) => {
+        if (response.error) {
+          console.error("❌ Failed to submit answer:", response.error)
+          setError(response.error)
+        } else {
+          // FIXED: Only update room state, don't trigger question reload
+          setRoom(response.room)
+        }
+      })
+    }
+
+    // FIXED: Show feedback for full 2000ms, then load next question
+    setTimeout(() => {
+      setShowAnswerFeedback(false)
+      setIsAnswering(false)
+      setCurrentQuestion(null)
+      
+      // Load next question after feedback is hidden
+      if (room && (room.game_mode === "practice" || room.game_mode === "competition")) {
+        setTimeout(() => {
+          loadQuestion(room)
+        }, 500)
+      }
+    }, 2000) // Full 2000ms feedback display
+  }
+
+  // Start cooperation timer
   const startCooperationTimer = () => {
     console.log("Timer started: 5")
     setCooperationCountdown(5)
     setCooperationTimerActive(true)
     
+    // Clear any existing timer
     if (cooperationTimerRef.current) {
       clearInterval(cooperationTimerRef.current)
     }
@@ -458,311 +472,263 @@ export default function RoomPage() {
     }, 1000)
   }
 
+  // Stop cooperation timer
   const stopCooperationTimer = () => {
     if (cooperationTimerRef.current) {
       clearInterval(cooperationTimerRef.current)
       cooperationTimerRef.current = null
     }
     setCooperationTimerActive(false)
-    setCooperationCountdown(5)
   }
 
-  // FIXED: Cooperation timeout handler with life reduction and turn switching
+  // Handle cooperation timeout
   const handleCooperationTimeout = () => {
-    if (!socket || !room) return
-    
-    stopCooperationTimer()
-    audio.playFailure()
-    
-    // Immediately reduce life and switch turns
-    const newLives = Math.max(0, (room.cooperation_lives || 3) - 1)
+    if (!socket || !room || !cooperationChallenge) return
+
+    const currentLives = room.cooperation_lives || 3
+    const newLives = Math.max(0, currentLives - 1)
     console.log(`Lives remaining: ${newLives}`)
-    
+
     // Find the other player for turn switching
     const otherPlayer = room.players.find(p => p.id !== playerId)
     if (otherPlayer) {
       console.log(`Turn switched to player: ${otherPlayer.name}`)
     }
-    
-    // Emit timeout event to server
+
     socket.emit("cooperation-timeout", {
       roomId,
       playerId,
-      data: { challengeId: cooperationChallenge?.challengeId }
-    })
-  }
-
-  // Get current player
-  const currentPlayer = room?.players.find(p => p.id === playerId)
-  const isCurrentPlayerHost = currentPlayer?.is_host || false
-
-  // Handle answer submission
-  const handleAnswerSubmit = async (answer: string, isTimeout: boolean = false) => {
-    if (isAnswering || !currentQuestion || !socket) return
-    
-    setIsAnswering(true)
-    
-    const isCorrect = answer === currentQuestion.correctAnswer
-    const currentTimeLeft = isTimeout ? 0 : timeLeft
-    
-    // Show feedback
-    setAnswerFeedback({
-      show: true,
-      isCorrect,
-      correctAnswer: currentQuestion.correctAnswer,
-      selectedAnswer: answer
-    })
-    
-    // Play sound
-    if (isCorrect) {
-      audio.playSuccess()
-    } else {
-      audio.playFailure()
-    }
-    
-    // Clear timer
-    if (timerRef.current) {
-      clearInterval(timerRef.current)
-    }
-    
-    // Submit answer to server
-    socket.emit("answer", {
-      roomId,
-      playerId,
       data: {
-        answer,
-        timeLeft: currentTimeLeft,
-        correctAnswer: currentQuestion.correctAnswer,
-        isPracticeMode: room?.game_mode === "practice"
-      }
-    }, (response: any) => {
-      if (response.error) {
-        console.error("❌ Failed to submit answer:", response.error)
-        setError(response.error)
+        challengeId: cooperationChallenge.challengeId,
+        lives: newLives
       }
     })
-    
-    // Reset for next question after delay
-    setTimeout(() => {
-      setCurrentQuestion(null)
-      setSelectedAnswer("")
-      setAnswerFeedback(null)
-      setIsAnswering(false)
-      
-      // Load next question if still playing
-      if (room?.game_state === "playing") {
-        loadQuestion(room)
-      }
-    }, 1000)
-  }
 
-  // Handle language selection
-  const handleLanguageChange = (language: string) => {
-    if (!socket || !currentPlayer) return
-
-    console.log(`🌐 Player ${playerId} selecting language: ${language}`)
-    
-    socket.emit("update-language", {
-      roomId,
-      playerId,
-      data: { language }
-    }, (response: any) => {
-      if (response.error) {
-        console.error("❌ Failed to update language:", response.error)
-        setError(response.error)
-      } else {
-        console.log(`✅ Language updated successfully to ${language}`)
-      }
-    })
-  }
-
-  // Handle ready toggle
-  const handleReadyToggle = () => {
-    if (!socket) return
-
-    console.log(`⚡ Player ${playerId} toggling ready status`)
-    
-    socket.emit("toggle-ready", { roomId, playerId }, (response: any) => {
-      if (response.error) {
-        console.error("❌ Failed to toggle ready:", response.error)
-        setError(response.error)
-      } else {
-        console.log(`✅ Ready status toggled successfully`)
-      }
-    })
-  }
-
-  // Handle game mode selection
-  const handleGameModeChange = (gameMode: string) => {
-    if (!socket || !isCurrentPlayerHost) return
-
-    console.log(`🎮 Host selecting game mode: ${gameMode}`)
-    
-    socket.emit("update-game-mode", {
-      roomId,
-      playerId,
-      data: { gameMode }
-    }, (response: any) => {
-      if (response.error) {
-        console.error("❌ Failed to update game mode:", response.error)
-        setError(response.error)
-      } else {
-        console.log(`✅ Game mode updated to ${gameMode}`)
-      }
-    })
-  }
-
-  // Handle host language selection (for competition mode)
-  const handleHostLanguageChange = (hostLanguage: string) => {
-    if (!socket || !isCurrentPlayerHost) return
-
-    console.log(`🌐 Host selecting competition language: ${hostLanguage}`)
-    
-    socket.emit("update-host-language", {
-      roomId,
-      playerId,
-      data: { hostLanguage }
-    }, (response: any) => {
-      if (response.error) {
-        console.error("❌ Failed to update host language:", response.error)
-        setError(response.error)
-      } else {
-        console.log(`✅ Host language updated to ${hostLanguage}`)
-      }
-    })
-  }
-
-  // Handle target score change
-  const handleTargetScoreChange = (targetScore: string) => {
-    if (!socket || !isCurrentPlayerHost) return
-
-    socket.emit("update-target-score", {
-      roomId,
-      playerId,
-      data: { targetScore: parseInt(targetScore) }
-    }, (response: any) => {
-      if (response.error) {
-        console.error("❌ Failed to update target score:", response.error)
-        setError(response.error)
-      }
-    })
-  }
-
-  // Handle game start
-  const handleStartGame = () => {
-    if (!socket || !isCurrentPlayerHost) return
-
-    console.log(`🎮 Starting game in ${room?.game_mode} mode`)
-    
-    socket.emit("start-game", { roomId, playerId }, (response: any) => {
-      if (response.error) {
-        console.error("❌ Failed to start game:", response.error)
-        setError(response.error)
-      } else {
-        console.log(`✅ Game started successfully`)
-      }
-    })
-  }
-
-  // Handle restart
-  const handleRestart = () => {
-    if (!socket || !isCurrentPlayerHost) return
-
-    socket.emit("restart", { roomId, playerId }, (response: any) => {
-      if (response.error) {
-        console.error("❌ Failed to restart game:", response.error)
-        setError(response.error)
-      }
-    })
-  }
-
-  // FIXED: Enhanced leave room with direct redirect
-  const handleLeaveRoom = () => {
-    console.log("🚪 Leaving room...")
-    
-    // Emit leave event if socket is available
-    if (socket) {
-      socket.emit("leave-room", { roomId, playerId })
-    }
-    
-    // Direct redirect to home URL
-    window.location.href = "https://oneplswork.onrender.com/"
+    // Reset local state
+    setCooperationAnswer("")
+    setCooperationChallenge(null)
+    setIsCooperationWaiting(true)
   }
 
   // Handle cooperation answer submission
-  const handleCooperationSubmit = async () => {
-    if (!cooperationChallenge || !cooperationAnswer.trim()) return
+  const handleCooperationAnswer = async () => {
+    if (!cooperationAnswer.trim() || !cooperationChallenge || !socket) return
 
     try {
-      const response = await fetch('/api/validate-cooperation-answer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/validate-cooperation-answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           categoryId: cooperationChallenge.categoryId,
           answer: cooperationAnswer.trim(),
           language: cooperationChallenge.language,
           usedWords: room?.used_words || []
-        })
+        }),
       })
 
-      const result = await response.json()
-
-      if (result.isCorrect && !result.isUsed) {
-        // Correct answer
-        audio.playSuccess()
-        stopCooperationTimer()
-        
-        socket?.emit("cooperation-answer", {
-          roomId,
-          playerId,
-          data: {
-            challengeId: cooperationChallenge.challengeId,
-            answer: cooperationAnswer.trim(),
-            isCorrect: true,
-            wordId: result.wordId
-          }
-        })
-      } else {
-        // Wrong answer or already used
-        console.log("❌ Cooperation answer result:", result.message)
-        setError(result.message)
-        setTimeout(() => setError(null), 3000)
+      const data = await response.json()
+      
+      if (data.success) {
+        if (data.isCorrect && !data.isUsed) {
+          // Correct and unused answer
+          audio.playSuccess()
+          socket.emit("cooperation-answer", {
+            roomId,
+            playerId,
+            data: {
+              challengeId: cooperationChallenge.challengeId,
+              answer: cooperationAnswer.trim(),
+              isCorrect: true,
+              wordId: data.wordId
+            }
+          })
+        } else if (data.isUsed) {
+          // Already used word
+          audio.playFailure()
+          setError(`"${cooperationAnswer}" has already been used. Try a different word!`)
+          setTimeout(() => setError(null), 3000)
+        } else {
+          // Incorrect answer
+          audio.playFailure()
+          setError(`"${cooperationAnswer}" is not a valid ${cooperationChallenge.englishName.toLowerCase()} word.`)
+          setTimeout(() => setError(null), 3000)
+        }
       }
     } catch (error) {
       console.error("❌ Error validating cooperation answer:", error)
       setError("Failed to validate answer")
       setTimeout(() => setError(null), 3000)
     }
+
+    setCooperationAnswer("")
+    stopCooperationTimer()
   }
 
   // Handle cooperation typing
   const handleCooperationTyping = (text: string) => {
     setCooperationAnswer(text)
+    
     if (socket) {
-      socket.emit("cooperation-typing", { roomId, playerId, text })
+      socket.emit("cooperation-typing", {
+        roomId,
+        playerId,
+        text
+      })
     }
+  }
+
+  // Socket event handlers
+  const updateGameMode = (gameMode: "practice" | "competition" | "cooperation") => {
+    if (!socket || !room) return
+
+    socket.emit("update-game-mode", {
+      roomId,
+      playerId,
+      data: { gameMode }
+    }, (response: any) => {
+      if (response.error) {
+        setError(response.error)
+      }
+    })
+  }
+
+  const changeGameMode = () => {
+    if (!socket || !room) return
+
+    socket.emit("change-game-mode", {
+      roomId,
+      playerId
+    }, (response: any) => {
+      if (response.error) {
+        setError(response.error)
+      }
+    })
+  }
+
+  const updateHostLanguage = (hostLanguage: "french" | "german" | "russian" | "japanese" | "spanish") => {
+    if (!socket || !room) return
+
+    socket.emit("update-host-language", {
+      roomId,
+      playerId,
+      data: { hostLanguage }
+    }, (response: any) => {
+      if (response.error) {
+        setError(response.error)
+      }
+    })
+  }
+
+  const updateLanguage = (language: "french" | "german" | "russian" | "japanese" | "spanish") => {
+    if (!socket || !room) return
+
+    socket.emit("update-language", {
+      roomId,
+      playerId,
+      data: { language }
+    }, (response: any) => {
+      if (response.error) {
+        setError(response.error)
+      }
+    })
+  }
+
+  const toggleReady = () => {
+    if (!socket || !room) return
+
+    socket.emit("toggle-ready", {
+      roomId,
+      playerId
+    }, (response: any) => {
+      if (response.error) {
+        setError(response.error)
+      }
+    })
+  }
+
+  const updateTargetScore = (targetScore: number) => {
+    if (!socket || !room) return
+
+    socket.emit("update-target-score", {
+      roomId,
+      playerId,
+      data: { targetScore }
+    }, (response: any) => {
+      if (response.error) {
+        setError(response.error)
+      }
+    })
+  }
+
+  const startGame = () => {
+    if (!socket || !room) return
+
+    console.log(`🎮 Starting game in ${room.game_mode} mode`)
+    socket.emit("start-game", {
+      roomId,
+      playerId
+    }, (response: any) => {
+      if (response.error) {
+        setError(response.error)
+      } else {
+        console.log("✅ Game started successfully")
+      }
+    })
+  }
+
+  const restartGame = () => {
+    if (!socket || !room) return
+
+    socket.emit("restart", {
+      roomId,
+      playerId
+    }, (response: any) => {
+      if (response.error) {
+        setError(response.error)
+      }
+    })
+  }
+
+  const leaveRoom = () => {
+    if (socket) {
+      socket.emit("leave-room", { roomId, playerId })
+    }
+    router.push("/")
+  }
+
+  // Get current player
+  const currentPlayer = room?.players.find(p => p.id === playerId)
+  const isCurrentPlayerHost = currentPlayer?.is_host || false
+
+  // Check if all players are ready
+  const allPlayersReady = room?.players.every(p => p.ready) || false
+  const hasEnoughPlayers = room?.players.length || 0 > 0
+
+  // Get game mode requirements
+  const canStartGame = () => {
+    if (!room || !hasEnoughPlayers) return false
+    
+    if (room.game_mode === "practice") {
+      return room.players.every(p => p.language && p.ready)
+    } else if (room.game_mode === "competition") {
+      return room.host_language && allPlayersReady
+    } else if (room.game_mode === "cooperation") {
+      return room.players.length === 2 && room.players.every(p => p.language && p.ready)
+    }
+    
+    return false
   }
 
   // Loading state
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardContent className="flex flex-col items-center justify-center p-8">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
-            <h2 className="text-xl font-semibold mb-2">
-              {isHost ? 'Creating Room...' : 'Joining Room...'}
-            </h2>
-            <p className="text-gray-600 text-center">
-              {connectionStatus === 'connecting' ? 'Connecting to server...' : 'Setting up room...'}
-            </p>
-            <div className="mt-4 text-sm text-gray-500">
-              <p>Room ID: {roomId}</p>
-              <p>Player: {decodeURIComponent(playerName || '')}</p>
-              <p>Role: {isHost ? 'Host' : 'Player'}</p>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-lg font-medium">
+            {isJoining ? "Joining room..." : "Connecting..."}
+          </p>
+        </div>
       </div>
     )
   }
@@ -771,16 +737,15 @@ export default function RoomPage() {
   if (error && !room) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardContent className="flex flex-col items-center justify-center p-8">
-            <div className="text-red-500 text-6xl mb-4">❌</div>
-            <h2 className="text-xl font-semibold mb-2 text-red-700">Error</h2>
-            <p className="text-gray-600 text-center mb-4">{error}</p>
-            <Button onClick={() => router.push('/')} className="w-full">
-              Return to Home
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="text-center max-w-md mx-auto p-6">
+          <XCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Connection Error</h2>
+          <p className="text-gray-600 mb-6">{error}</p>
+          <Button onClick={() => router.push("/")} className="w-full">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Return to Home
+          </Button>
+        </div>
       </div>
     )
   }
@@ -788,17 +753,10 @@ export default function RoomPage() {
   if (!room) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardContent className="flex flex-col items-center justify-center p-8">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
-            <h2 className="text-xl font-semibold mb-2">Loading Room...</h2>
-            <p className="text-gray-600 text-center">Please wait while we load the room data.</p>
-            <div className="mt-4 text-sm text-gray-500">
-              <p>Connection: {connectionStatus}</p>
-              <p>Room ID: {roomId}</p>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-lg font-medium">Loading room...</p>
+        </div>
       </div>
     )
   }
@@ -808,772 +766,731 @@ export default function RoomPage() {
       <div className="mobile-container mobile-padding">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <Users className="h-6 w-6 text-blue-600" />
-              <h1 className="mobile-text-xl font-bold">Room {roomId}</h1>
-            </div>
-            {isCurrentPlayerHost && (
-              <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
-                <Crown className="h-3 w-3 mr-1" />
-                Host
-              </Badge>
-            )}
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className={
-              connectionStatus === 'connected' 
-                ? "bg-green-50 text-green-700 border-green-200"
-                : "bg-red-50 text-red-700 border-red-200"
-            }>
-              {connectionStatus === 'connected' ? '✅ Connected' : '❌ Disconnected'}
-            </Badge>
+          <div className="flex items-center gap-4">
             <SoundButton
-              onClick={handleLeaveRoom}
+              onClick={leaveRoom}
               variant="outline"
               className="mobile-btn-sm"
             >
-              <LogOut className="h-4 w-4" />
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              <span className="hidden sm:inline">Leave</span>
             </SoundButton>
+            
+            <div>
+              <h1 className="mobile-text-xl sm:text-2xl font-bold text-gray-900">
+                Room {room.id}
+              </h1>
+              <div className="flex items-center gap-2 mt-1">
+                <Badge variant="outline" className="mobile-text-sm">
+                  {room.game_state === "lobby" && "Waiting"}
+                  {room.game_state === "playing" && "Playing"}
+                  {room.game_state === "finished" && "Finished"}
+                </Badge>
+                {room.game_mode && (
+                  <Badge variant="outline" className="mobile-text-sm">
+                    {room.game_mode === "practice" && (
+                      <>
+                        <BookOpen className="h-3 w-3 mr-1" />
+                        Practice
+                      </>
+                    )}
+                    {room.game_mode === "competition" && (
+                      <>
+                        <Zap className="h-3 w-3 mr-1" />
+                        Competition
+                      </>
+                    )}
+                    {room.game_mode === "cooperation" && (
+                      <>
+                        <HandHeart className="h-3 w-3 mr-1" />
+                        Cooperation
+                      </>
+                    )}
+                  </Badge>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <SoundButton
+              onClick={() => setShowAudioSettings(!showAudioSettings)}
+              variant="outline"
+              className="mobile-btn-sm"
+            >
+              <Volume2 className="h-4 w-4" />
+            </SoundButton>
+            
+            {!isConnected && (
+              <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                Disconnected
+              </Badge>
+            )}
           </div>
         </div>
 
-        {/* Error Display */}
-        {error && (
-          <Card className="mb-6 border-red-200 bg-red-50">
-            <CardContent className="p-4">
-              <p className="text-red-700 text-center">{error}</p>
-            </CardContent>
-          </Card>
+        {/* Audio Settings */}
+        {showAudioSettings && (
+          <div className="mb-6">
+            <AudioSettings />
+          </div>
         )}
 
-        {/* Question Loading Error */}
-        {questionLoadingError && (
-          <Card className="mb-6 border-orange-200 bg-orange-50">
-            <CardContent className="p-4">
-              <p className="text-orange-700 text-center">⚠️ {questionLoadingError}</p>
-            </CardContent>
-          </Card>
+        {/* Error Display */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-center gap-2">
+              <XCircle className="h-5 w-5 text-red-600" />
+              <p className="text-red-700 font-medium">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Connection Error */}
+        {connectionError && (
+          <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-center gap-2">
+              <XCircle className="h-5 w-5 text-yellow-600" />
+              <p className="text-yellow-700 font-medium">{connectionError}</p>
+            </div>
+          </div>
         )}
 
         {/* Game Content */}
-        {room.game_state === "lobby" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Main Lobby Content */}
-            <div className="lg:col-span-2 space-y-6">
-              
-              {/* Players List */}
-              <Card className="mobile-card">
-                <CardHeader className="mobile-padding">
-                  <CardTitle className="flex items-center gap-2 mobile-text-lg">
-                    <Users className="h-5 w-5" />
-                    Players ({room.players.length}/{room.game_mode === "cooperation" ? 2 : 8})
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="mobile-spacing-sm mobile-padding">
-                  {room.players.map((player) => (
-                    <div
-                      key={player.id}
-                      className="flex items-center justify-between p-3 border rounded-lg"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                          {player.is_host && <Crown className="h-4 w-4 text-yellow-600" />}
-                          <span className="font-medium mobile-text-base">{player.name}</span>
-                          {player.id === playerId && (
-                            <Badge variant="outline" className="text-xs">You</Badge>
-                          )}
-                        </div>
+        <div className="mobile-grid-stack lg:grid-cols-3 lg:gap-6">
+          {/* Main Game Area */}
+          <div className="lg:col-span-2 mobile-spacing-md">
+            {/* Lobby State */}
+            {room.game_state === "lobby" && (
+              <div className="mobile-spacing-md">
+                {/* Game Mode Selection */}
+                {!room.game_mode && isCurrentPlayerHost && (
+                  <Card className="mobile-card">
+                    <CardHeader className="mobile-padding">
+                      <CardTitle className="mobile-text-xl">Choose Game Mode</CardTitle>
+                      <CardDescription className="mobile-text-base">
+                        Select how you want to play
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="mobile-spacing-md mobile-padding">
+                      <div className="mobile-grid-stack sm:grid-cols-3 gap-4">
+                        <SoundButton
+                          onClick={() => updateGameMode("practice")}
+                          variant="outline"
+                          className="mobile-btn-lg h-auto p-4 flex-col"
+                        >
+                          <BookOpen className="h-6 w-6 mb-2 text-blue-600" />
+                          <span className="font-semibold">Practice</span>
+                          <span className="text-xs text-gray-600 mt-1">Individual languages, no penalties</span>
+                        </SoundButton>
+                        
+                        <SoundButton
+                          onClick={() => updateGameMode("competition")}
+                          variant="outline"
+                          className="mobile-btn-lg h-auto p-4 flex-col"
+                        >
+                          <Zap className="h-6 w-6 mb-2 text-orange-600" />
+                          <span className="font-semibold">Competition</span>
+                          <span className="text-xs text-gray-600 mt-1">Same language, point penalties</span>
+                        </SoundButton>
+                        
+                        <SoundButton
+                          onClick={() => updateGameMode("cooperation")}
+                          variant="outline"
+                          className="mobile-btn-lg h-auto p-4 flex-col"
+                        >
+                          <HandHeart className="h-6 w-6 mb-2 text-purple-600" />
+                          <span className="font-semibold">Cooperation</span>
+                          <span className="text-xs text-gray-600 mt-1">2 players, type words by category</span>
+                        </SoundButton>
                       </div>
-                      
-                      <div className="flex items-center gap-2">
-                        {player.language && (
-                          <Badge variant="outline" className="text-xs">
-                            {LANGUAGES.find(l => l.value === player.language)?.label}
-                          </Badge>
-                        )}
-                        <div className="flex items-center gap-1">
-                          {player.ready ? (
-                            <Badge variant="default" className="text-xs bg-green-600 text-white">
-                              <Check className="h-3 w-3 mr-1" />
-                              Ready
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-xs">
-                              <X className="h-3 w-3 mr-1" />
-                              Not Ready
-                            </Badge>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Game Mode Selected */}
+                {room.game_mode && (
+                  <Card className="mobile-card">
+                    <CardHeader className="mobile-padding">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="flex items-center gap-2 mobile-text-xl">
+                          {room.game_mode === "practice" && (
+                            <>
+                              <BookOpen className="h-5 w-5 text-blue-600" />
+                              Practice Mode
+                            </>
                           )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-
-              {/* Game Mode Selection */}
-              {isCurrentPlayerHost && !room.game_mode && (
-                <Card className="mobile-card">
-                  <CardHeader className="mobile-padding">
-                    <CardTitle className="mobile-text-lg">Select Game Mode</CardTitle>
-                    <CardDescription className="mobile-text-base">
-                      Choose how you want to play
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="mobile-spacing-md mobile-padding">
-                    <div className="mobile-spacing-sm">
-                      <SoundButton
-                        onClick={() => handleGameModeChange("practice")}
-                        variant="outline"
-                        className="w-full mobile-btn-lg justify-start"
-                      >
-                        <BookOpen className="h-5 w-5 mr-3 text-blue-600" />
-                        <div className="text-left">
-                          <div className="font-medium">Practice Mode</div>
-                          <div className="text-sm text-gray-600">Individual language selection, no penalties</div>
-                        </div>
-                      </SoundButton>
-                      
-                      <SoundButton
-                        onClick={() => handleGameModeChange("competition")}
-                        variant="outline"
-                        className="w-full mobile-btn-lg justify-start"
-                      >
-                        <Zap className="h-5 w-5 mr-3 text-orange-600" />
-                        <div className="text-left">
-                          <div className="font-medium">Competition Mode</div>
-                          <div className="text-sm text-gray-600">Same language for all, point penalties apply</div>
-                        </div>
-                      </SoundButton>
-                      
-                      <SoundButton
-                        onClick={() => handleGameModeChange("cooperation")}
-                        variant="outline"
-                        className="w-full mobile-btn-lg justify-start"
-                      >
-                        <HandHeart className="h-5 w-5 mr-3 text-purple-600" />
-                        <div className="text-left">
-                          <div className="font-medium">Cooperation Mode</div>
-                          <div className="text-sm text-gray-600">2 players, type words by category, share 3 lives</div>
-                        </div>
-                      </SoundButton>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Game Settings */}
-              {room.game_mode && (
-                <Card className="mobile-card">
-                  <CardHeader className="mobile-padding">
-                    <CardTitle className="flex items-center gap-2 mobile-text-lg">
-                      <Settings className="h-5 w-5" />
-                      Game Settings
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="mobile-spacing-md mobile-padding">
-                    {/* Current Game Mode */}
-                    <div className="flex items-center justify-between">
-                      <span className="mobile-text-base font-medium">Game Mode:</span>
-                      <div className="flex items-center gap-2">
-                        {room.game_mode === "practice" && (
-                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                            <BookOpen className="h-3 w-3 mr-1" />
-                            Practice
-                          </Badge>
-                        )}
-                        {room.game_mode === "competition" && (
-                          <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
-                            <Zap className="h-3 w-3 mr-1" />
-                            Competition
-                          </Badge>
-                        )}
-                        {room.game_mode === "cooperation" && (
-                          <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
-                            <HandHeart className="h-3 w-3 mr-1" />
-                            Cooperation
-                          </Badge>
-                        )}
+                          {room.game_mode === "competition" && (
+                            <>
+                              <Zap className="h-5 w-5 text-orange-600" />
+                              Competition Mode
+                            </>
+                          )}
+                          {room.game_mode === "cooperation" && (
+                            <>
+                              <HandHeart className="h-5 w-5 text-purple-600" />
+                              Cooperation Mode
+                            </>
+                          )}
+                        </CardTitle>
                         {isCurrentPlayerHost && (
                           <SoundButton
-                            onClick={() => handleGameModeChange(null)}
+                            onClick={changeGameMode}
                             variant="outline"
-                            size="sm"
+                            className="mobile-btn-sm"
                           >
+                            <Settings className="h-4 w-4 mr-1" />
                             Change
                           </SoundButton>
                         )}
                       </div>
-                    </div>
-
-                    {/* Target Score */}
-                    <div className="flex items-center justify-between">
-                      <span className="mobile-text-base font-medium">Target Score:</span>
-                      {isCurrentPlayerHost ? (
-                        <Select value={room.target_score.toString()} onValueChange={handleTargetScoreChange}>
-                          <SelectTrigger className="w-24">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {TARGET_SCORES.map(score => (
-                              <SelectItem key={score} value={score.toString()}>
-                                {score}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <Badge variant="outline">
-                          <Target className="h-3 w-3 mr-1" />
-                          {room.target_score}
-                        </Badge>
-                      )}
-                    </div>
-
-                    {/* Host Language (Competition Mode) */}
-                    {room.game_mode === "competition" && (
-                      <div className="flex items-center justify-between">
-                        <span className="mobile-text-base font-medium">Language:</span>
-                        {isCurrentPlayerHost ? (
-                          <Select value={room.host_language || ""} onValueChange={handleHostLanguageChange}>
-                            <SelectTrigger className="w-32">
-                              <SelectValue placeholder="Select..." />
+                      <CardDescription className="mobile-text-base">
+                        {room.game_mode === "practice" && "Each player chooses their own language. No point penalties for wrong answers."}
+                        {room.game_mode === "competition" && "All players use the same language. Wrong answers lose points."}
+                        {room.game_mode === "cooperation" && "Work together! Type words from categories. Share 3 lives."}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="mobile-spacing-md mobile-padding">
+                      {/* Competition Mode Language Selection */}
+                      {room.game_mode === "competition" && isCurrentPlayerHost && (
+                        <div className="mb-4">
+                          <label className="block mobile-text-base font-medium mb-2">
+                            Competition Language
+                          </label>
+                          <Select
+                            value={room.host_language || ""}
+                            onValueChange={(value) => updateHostLanguage(value as any)}
+                          >
+                            <SelectTrigger className="mobile-input">
+                              <SelectValue placeholder="Select language for all players" />
                             </SelectTrigger>
                             <SelectContent>
-                              {LANGUAGES.map(lang => (
+                              {LANGUAGES.map((lang) => (
                                 <SelectItem key={lang.value} value={lang.value}>
                                   {lang.label}
                                 </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
-                        ) : (
-                          <Badge variant="outline">
-                            <Globe className="h-3 w-3 mr-1" />
-                            {room.host_language ? LANGUAGES.find(l => l.value === room.host_language)?.label : "Not set"}
-                          </Badge>
+                        </div>
+                      )}
+
+                      {/* Competition Mode Language Display */}
+                      {room.game_mode === "competition" && room.host_language && (
+                        <div className="mb-4 p-3 bg-orange-50 rounded-lg border border-orange-200">
+                          <div className="flex items-center gap-2">
+                            <Globe className="h-4 w-4 text-orange-600" />
+                            <span className="font-medium text-orange-700">
+                              Competition Language: {LANGUAGES.find(l => l.value === room.host_language)?.label}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Practice/Cooperation Mode Language Selection */}
+                      {(room.game_mode === "practice" || room.game_mode === "cooperation") && (
+                        <div className="mb-4">
+                          <label className="block mobile-text-base font-medium mb-2">
+                            Your Language
+                          </label>
+                          <Select
+                            value={currentPlayer?.language || ""}
+                            onValueChange={(value) => updateLanguage(value as any)}
+                          >
+                            <SelectTrigger className="mobile-input">
+                              <SelectValue placeholder="Select your language" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {LANGUAGES.map((lang) => (
+                                <SelectItem key={lang.value} value={lang.value}>
+                                  {lang.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {/* Target Score Selection */}
+                      {isCurrentPlayerHost && room.game_mode !== "cooperation" && (
+                        <div className="mb-4">
+                          <label className="block mobile-text-base font-medium mb-2">
+                            Target Score
+                          </label>
+                          <Select
+                            value={room.target_score.toString()}
+                            onValueChange={(value) => updateTargetScore(Number(value))}
+                          >
+                            <SelectTrigger className="mobile-input">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="100">100 points</SelectItem>
+                              <SelectItem value="250">250 points</SelectItem>
+                              <SelectItem value="500">500 points</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {/* Ready Toggle */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="mobile-text-base font-medium">Ready to play?</p>
+                          <p className="mobile-text-sm text-gray-600">
+                            {room.game_mode === "practice" && "Select your language first"}
+                            {room.game_mode === "competition" && "Host must select competition language"}
+                            {room.game_mode === "cooperation" && "Select your language and wait for 2 players"}
+                          </p>
+                        </div>
+                        <SoundButton
+                          onClick={toggleReady}
+                          variant={currentPlayer?.ready ? "default" : "outline"}
+                          className="mobile-btn-md"
+                          disabled={
+                            (room.game_mode === "practice" && !currentPlayer?.language) ||
+                            (room.game_mode === "competition" && !room.host_language) ||
+                            (room.game_mode === "cooperation" && !currentPlayer?.language)
+                          }
+                        >
+                          {currentPlayer?.ready ? (
+                            <>
+                              <CheckCircle className="h-4 w-4 mr-2" />
+                              Ready
+                            </>
+                          ) : (
+                            "Get Ready"
+                          )}
+                        </SoundButton>
+                      </div>
+
+                      {/* Start Game Button */}
+                      {isCurrentPlayerHost && (
+                        <div className="mt-4 pt-4 border-t">
+                          <SoundButton
+                            onClick={startGame}
+                            disabled={!canStartGame()}
+                            className="mobile-btn-lg w-full"
+                          >
+                            <Gamepad2 className="h-5 w-5 mr-2" />
+                            Start Game
+                          </SoundButton>
+                          {!canStartGame() && (
+                            <p className="mobile-text-sm text-gray-600 mt-2 text-center">
+                              {room.game_mode === "cooperation" && room.players.length !== 2 && "Need exactly 2 players"}
+                              {room.game_mode === "cooperation" && room.players.length === 2 && !allPlayersReady && "All players must be ready"}
+                              {room.game_mode !== "cooperation" && !allPlayersReady && "All players must be ready"}
+                              {room.game_mode === "practice" && room.players.some(p => !p.language) && "All players must select a language"}
+                              {room.game_mode === "competition" && !room.host_language && "Host must select competition language"}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
+
+            {/* Playing State */}
+            {room.game_state === "playing" && (
+              <div className="mobile-spacing-md">
+                {/* Practice/Competition Mode Question */}
+                {(room.game_mode === "practice" || room.game_mode === "competition") && (
+                  <Card className="mobile-card">
+                    <CardHeader className="mobile-padding">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="mobile-text-xl">
+                          Translate this word
+                        </CardTitle>
+                        {isQuestionTimerActive && (
+                          <div className="flex items-center gap-2">
+                            <Timer className="h-4 w-4 text-blue-600" />
+                            <span className={`font-bold ${questionTimer <= 3 ? 'text-red-600' : 'text-blue-600'}`}>
+                              {questionTimer}s
+                            </span>
+                          </div>
                         )}
                       </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Language Selection (Practice/Cooperation Mode) */}
-              {(room.game_mode === "practice" || room.game_mode === "cooperation") && (
-                <Card className="mobile-card">
-                  <CardHeader className="mobile-padding">
-                    <CardTitle className="mobile-text-lg">Select Your Language</CardTitle>
-                    <CardDescription className="mobile-text-base">
-                      Choose the language you want to practice
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="mobile-padding">
-                    <Select value={currentPlayer?.language || ""} onValueChange={handleLanguageChange}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Choose a language..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LANGUAGES.map(lang => (
-                          <SelectItem key={lang.value} value={lang.value}>
-                            {lang.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Ready/Start Button */}
-              {room.game_mode && (
-                <div className="space-y-4">
-                  {/* Ready Button */}
-                  <div className="flex justify-center">
-                    <SoundButton
-                      onClick={handleReadyToggle}
-                      className={`mobile-btn-lg px-8 ${
-                        currentPlayer?.ready 
-                          ? "bg-green-600 hover:bg-green-700 text-white" 
-                          : "bg-blue-600 hover:bg-blue-700 text-white"
-                      }`}
-                      disabled={
-                        (room.game_mode === "practice" || room.game_mode === "cooperation") && !currentPlayer?.language ||
-                        room.game_mode === "competition" && !room.host_language
-                      }
-                    >
-                      {currentPlayer?.ready ? (
-                        <>
-                          <Check className="h-5 w-5 mr-2" />
-                          Ready!
-                        </>
-                      ) : (
-                        "Ready to Play"
+                      {isQuestionTimerActive && (
+                        <Progress 
+                          value={(questionTimer / 10) * 100} 
+                          className="h-2"
+                        />
                       )}
-                    </SoundButton>
-                  </div>
+                    </CardHeader>
+                    <CardContent className="mobile-padding">
+                      {currentQuestion ? (
+                        <div className="mobile-spacing-md">
+                          <div className="text-center mb-6">
+                            <h2 className="mobile-text-3xl font-bold text-gray-900 mb-2">
+                              {currentQuestion.english}
+                            </h2>
+                            <p className="mobile-text-base text-gray-600">
+                              Choose the correct translation in{" "}
+                              {room.game_mode === "practice" 
+                                ? LANGUAGES.find(l => l.value === currentPlayer?.language)?.label
+                                : LANGUAGES.find(l => l.value === room.host_language)?.label
+                              }
+                            </p>
+                          </div>
 
-                  {/* Start Game Button (Host Only) */}
-                  {isCurrentPlayerHost && room.players.every(p => p.ready) && (
-                    <div className="flex justify-center">
-                      <SoundButton
-                        onClick={handleStartGame}
-                        className="mobile-btn-lg px-8 bg-green-600 hover:bg-green-700 text-white"
-                      >
-                        <Play className="h-5 w-5 mr-2" />
-                        Start Game
-                      </SoundButton>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+                          {/* FIXED: Answer feedback display */}
+                          {showAnswerFeedback ? (
+                            <div className="text-center mobile-spacing-md">
+                              <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium ${
+                                lastAnswerCorrect 
+                                  ? 'bg-green-100 text-green-800 border border-green-200' 
+                                  : 'bg-red-100 text-red-800 border border-red-200'
+                              }`}>
+                                {lastAnswerCorrect ? (
+                                  <>
+                                    <CheckCircle className="h-5 w-5" />
+                                    Correct!
+                                  </>
+                                ) : (
+                                  <>
+                                    <XCircle className="h-5 w-5" />
+                                    Incorrect
+                                  </>
+                                )}
+                              </div>
+                              {!lastAnswerCorrect && (
+                                <p className="mobile-text-base text-gray-600 mt-2">
+                                  The correct answer was: <strong>{currentQuestion.correctAnswer}</strong>
+                                </p>
+                              )}
+                              <p className="mobile-text-sm text-gray-500 mt-2">
+                                Loading next question...
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {currentQuestion.options.map((option, index) => (
+                                <SoundButton
+                                  key={index}
+                                  onClick={() => handleAnswer(option)}
+                                  disabled={isAnswering || !isQuestionTimerActive}
+                                  variant="outline"
+                                  className="h-[60px] w-[85%] mx-auto text-black bg-white hover:bg-gray-50 border-gray-300 mobile-text-base font-medium"
+                                >
+                                  {option}
+                                </SoundButton>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                          <p className="mobile-text-lg font-medium">Loading question...</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
 
-            {/* Rules Section */}
-            <div className="lg:col-span-1">
-              <Card className="mobile-card">
-                <CardHeader className="mobile-padding">
-                  <CardTitle className="mobile-text-lg">Game Rules</CardTitle>
-                </CardHeader>
-                <CardContent className="mobile-spacing-sm mobile-text-sm mobile-padding">
-                  <div className="mobile-spacing-sm">
-                    <p className="font-medium mobile-text-base">🎯 Game Modes:</p>
-                    <div className="mobile-spacing-sm ml-4">
-                      <div className="flex items-start gap-2">
-                        <BookOpen className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                        <div className="min-w-0">
-                          <p className="font-medium text-blue-600 mobile-text-sm">Practice Mode</p>
-                          <p className="text-gray-600 mobile-text-sm">Individual language selection, no penalties for wrong answers</p>
+                {/* Cooperation Mode */}
+                {room.game_mode === "cooperation" && (
+                  <Card className="mobile-card">
+                    <CardHeader className="mobile-padding">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="flex items-center gap-2 mobile-text-xl">
+                          <HandHeart className="h-5 w-5 text-purple-600" />
+                          Cooperation Mode
+                        </CardTitle>
+                        <div className="flex items-center gap-4">
+                          <div className="text-center">
+                            <div className="mobile-text-sm text-gray-600">Lives</div>
+                            <div className="flex gap-1">
+                              {Array.from({ length: 3 }).map((_, i) => (
+                                <HandHeart
+                                  key={i}
+                                  className={`h-4 w-4 ${
+                                    i < (room.cooperation_lives || 3)
+                                      ? "text-red-500 fill-current"
+                                      : "text-gray-300"
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                          <div className="text-center">
+                            <div className="mobile-text-sm text-gray-600">Score</div>
+                            <div className="mobile-text-lg font-bold text-purple-600">
+                              {room.cooperation_score || 0}
+                            </div>
+                          </div>
                         </div>
                       </div>
-                      <div className="flex items-start gap-2">
-                        <Zap className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
-                        <div className="min-w-0">
-                          <p className="font-medium text-orange-600 mobile-text-sm">Competition Mode</p>
-                          <p className="text-gray-600 mobile-text-sm">Same language for all players, point penalties for wrong answers</p>
+                    </CardHeader>
+                    <CardContent className="mobile-padding">
+                      {isCooperationWaiting ? (
+                        <div className="text-center py-8">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                          <p className="mobile-text-lg font-medium">Preparing next challenge...</p>
                         </div>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <HandHeart className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
-                        <div className="min-w-0">
-                          <p className="font-medium text-purple-600 mobile-text-sm">Cooperation Mode</p>
-                          <p className="text-gray-600 mobile-text-sm">2 players work together, type words by category, share 3 lives</p>
+                      ) : cooperationChallenge ? (
+                        <div className="mobile-spacing-md">
+                          <div className="text-center mb-6">
+                            <h2 className="mobile-text-2xl font-bold text-gray-900 mb-2">
+                              {cooperationChallenge.categoryName}
+                            </h2>
+                            <p className="mobile-text-base text-gray-600">
+                              Type a word from this category in{" "}
+                              {LANGUAGES.find(l => l.value === cooperationChallenge.language)?.label}
+                            </p>
+                            <p className="mobile-text-sm text-gray-500 mt-1">
+                              Current player: {room.players.find(p => p.id === room.current_challenge_player)?.name}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-4 mb-4">
+                            <div className="flex-1">
+                              <Input
+                                value={cooperationAnswer}
+                                onChange={(e) => handleCooperationTyping(e.target.value)}
+                                onKeyPress={(e) => {
+                                  if (e.key === "Enter") {
+                                    handleCooperationAnswer()
+                                  }
+                                }}
+                                placeholder={`Type a ${cooperationChallenge.englishName.toLowerCase()} word...`}
+                                disabled={room.current_challenge_player !== playerId}
+                                className="mobile-input"
+                              />
+                            </div>
+                            {cooperationChallenge && (
+                              <div className="text-center">
+                                <div className={`cooperation-timer ${cooperationCountdown <= 2 ? 'warning' : 'normal'}`}>
+                                  {cooperationCountdown}
+                                </div>
+                                <div className="mobile-text-sm text-gray-600">Timer</div>
+                              </div>
+                            )}
+                            <SoundButton
+                              onClick={handleCooperationAnswer}
+                              disabled={!cooperationAnswer.trim() || room.current_challenge_player !== playerId}
+                              className="mobile-btn-md"
+                            >
+                              Submit
+                            </SoundButton>
+                          </div>
+
+                          {cooperationTyping && cooperationTyping.playerId !== playerId && (
+                            <div className="text-center mobile-text-sm text-gray-600">
+                              {room.players.find(p => p.id === cooperationTyping.playerId)?.name} is typing: "{cooperationTyping.text}"
+                            </div>
+                          )}
+
+                          {room.current_challenge_player !== playerId && (
+                            <div className="text-center mobile-text-sm text-gray-600 mt-4">
+                              Waiting for {room.players.find(p => p.id === room.current_challenge_player)?.name} to answer...
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mobile-spacing-sm">
-                    <p className="font-medium mobile-text-base">🎮 How to Play:</p>
-                    <ul className="mobile-spacing-sm text-gray-600 ml-4">
-                      <li className="mobile-text-sm">• Choose your game mode and language</li>
-                      <li className="mobile-text-sm">• Translate English words correctly</li>
-                      <li className="mobile-text-sm">• Earn points for correct answers</li>
-                      <li className="mobile-text-sm">• First to reach target score wins!</li>
-                    </ul>
-                  </div>
-
-                  <div className="mobile-spacing-sm">
-                    <p className="font-medium mobile-text-base">🌍 Languages:</p>
-                    <div className="mobile-flex-wrap">
-                      {["French", "German", "Russian", "Japanese", "Spanish"].map((lang) => (
-                        <Badge key={lang} variant="outline" className="mobile-text-sm">
-                          {lang}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-
-                  {connectionStatus === 'error' && (
-                    <div className="mobile-spacing-sm mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
-                      <p className="font-medium text-red-700 mobile-text-sm">🔧 Connection Issues?</p>
-                      <ul className="mobile-spacing-sm text-red-600 mobile-text-sm ml-4">
-                        <li>• Try refreshing the page</li>
-                        <li>• Check your internet connection</li>
-                        <li>• Disable ad blockers if any</li>
-                        <li>• Try a different browser</li>
-                        <li>• Clear browser cache and cookies</li>
-                      </ul>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        )}
-
-        {/* Practice/Competition Mode Gameplay */}
-        {room.game_state === "playing" && (room.game_mode === "practice" || room.game_mode === "competition") && (
-          <div className="max-w-4xl mx-auto space-y-6">
-            {/* Game Header */}
-            <div className="text-center">
-              <div className="flex items-center justify-center gap-4 mb-4">
-                <Badge variant="outline" className={
-                  room.game_mode === "practice" 
-                    ? "bg-blue-50 text-blue-700 border-blue-200"
-                    : "bg-orange-50 text-orange-700 border-orange-200"
-                }>
-                  {room.game_mode === "practice" ? (
-                    <>
-                      <BookOpen className="h-3 w-3 mr-1" />
-                      Practice Mode
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="h-3 w-3 mr-1" />
-                      Competition Mode
-                    </>
-                  )}
-                </Badge>
-                <Badge variant="outline">
-                  <Target className="h-3 w-3 mr-1" />
-                  Target: {room.target_score}
-                </Badge>
+                      ) : (
+                        <div className="text-center py-8">
+                          <p className="mobile-text-lg font-medium">Waiting for challenge...</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
               </div>
-            </div>
+            )}
 
-            {/* Question Section */}
-            {currentQuestion ? (
+            {/* Finished State */}
+            {room.game_state === "finished" && (
               <Card className="mobile-card">
                 <CardHeader className="mobile-padding text-center">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-5 w-5 text-blue-600" />
-                      <span className={`font-bold text-lg ${timeLeft <= 3 ? 'text-red-600' : 'text-blue-600'}`}>
-                        {timeLeft}s
-                      </span>
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      Question #{(room.question_count || 0) + 1}
-                    </div>
-                  </div>
-                  <CardTitle className="mobile-text-2xl mb-2">
-                    Translate: <span className="text-blue-600">{currentQuestion.english}</span>
-                  </CardTitle>
-                  <CardDescription className="mobile-text-base">
-                    Choose the correct translation in{" "}
-                    <strong>
-                      {room.game_mode === "practice" 
-                        ? LANGUAGES.find(l => l.value === currentPlayer?.language)?.label
-                        : LANGUAGES.find(l => l.value === room.host_language)?.label
-                      }
-                    </strong>
+                  <Trophy className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+                  <CardTitle className="mobile-text-2xl">Game Over!</CardTitle>
+                  <CardDescription className="mobile-text-lg">
+                    {room.game_mode === "cooperation" ? (
+                      (room.cooperation_lives || 0) > 0 ? (
+                        <>🎉 Congratulations! You scored {room.cooperation_score} points together!</>
+                      ) : (
+                        <>💔 Game over! You scored {room.cooperation_score} points together.</>
+                      )
+                    ) : room.winner_id ? (
+                      <>🎉 {room.players.find(p => p.id === room.winner_id)?.name} wins!</>
+                    ) : (
+                      <>Game finished</>
+                    )}
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="mobile-padding">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {currentQuestion.options.map((option, index) => (
-                      <SoundButton
-                        key={index}
-                        onClick={() => handleAnswerSubmit(option)}
-                        disabled={isAnswering}
-                        className={`answer-option ${
-                          answerFeedback?.show 
-                            ? option === currentQuestion.correctAnswer 
-                              ? 'correct' 
-                              : option === answerFeedback.selectedAnswer 
-                                ? 'incorrect' 
-                                : ''
-                            : ''
-                        }`}
-                        style={{
-                          backgroundColor: answerFeedback?.show 
-                            ? option === currentQuestion.correctAnswer 
-                              ? '#4CAF50' 
-                              : option === answerFeedback.selectedAnswer 
-                                ? '#F44336' 
-                                : 'white'
-                            : 'white',
-                          color: answerFeedback?.show 
-                            ? option === currentQuestion.correctAnswer || option === answerFeedback.selectedAnswer
-                              ? 'white' 
-                              : 'black'
-                            : 'black',
-                          height: '80px',
-                          width: '85%'
-                        }}
-                      >
-                        {option}
-                      </SoundButton>
-                    ))}
-                  </div>
-
-                  {answerFeedback?.show && (
-                    <div className="correct-answer-display">
-                      {answerFeedback.isCorrect ? (
-                        <span>✅ Correct! Well done!</span>
-                      ) : (
-                        <span>❌ Incorrect. The correct answer was: <strong>{answerFeedback.correctAnswer}</strong></span>
-                      )}
-                    </div>
+                <CardContent className="mobile-padding text-center">
+                  {isCurrentPlayerHost && (
+                    <SoundButton
+                      onClick={restartGame}
+                      className="mobile-btn-lg"
+                    >
+                      <RotateCcw className="h-5 w-5 mr-2" />
+                      Play Again
+                    </SoundButton>
                   )}
-                </CardContent>
-              </Card>
-            ) : isLoadingQuestion ? (
-              <Card className="mobile-card">
-                <CardContent className="flex flex-col items-center justify-center p-8">
-                  <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
-                  <h3 className="mobile-text-lg font-semibold mb-2">Loading Question...</h3>
-                  <p className="text-gray-600 text-center">Please wait while we prepare your next question.</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <Card className="mobile-card">
-                <CardContent className="flex flex-col items-center justify-center p-8">
-                  <Timer className="h-12 w-12 text-gray-400 mb-4" />
-                  <h3 className="mobile-text-lg font-semibold mb-2">Waiting for Question</h3>
-                  <p className="text-gray-600 text-center">The next question will appear here.</p>
                 </CardContent>
               </Card>
             )}
+          </div>
 
-            {/* Leaderboard */}
-            <div className="leaderboard-container">
-              <h3 className="mobile-text-lg font-semibold mb-4 text-center">Leaderboard</h3>
-              <div className="space-y-2">
-                {room.players
-                  .sort((a, b) => b.score - a.score)
-                  .map((player, index) => (
+          {/* Sidebar */}
+          <div className="mobile-spacing-md">
+            {/* Players List */}
+            <Card className="mobile-card">
+              <CardHeader className="mobile-padding">
+                <CardTitle className="flex items-center gap-2 mobile-text-lg">
+                  <Users className="h-5 w-5" />
+                  Players ({room.players.length})
+                  {room.game_mode === "cooperation" && (
+                    <Badge variant="outline" className="mobile-text-sm">
+                      Max 2
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="mobile-padding">
+                <div className="mobile-spacing-sm">
+                  {room.players.map((player) => (
                     <div
                       key={player.id}
-                      className={`leaderboard-player ${player.id === playerId ? 'current-player' : ''}`}
+                      className={`flex items-center justify-between p-3 rounded-lg border ${
+                        player.id === playerId ? "bg-blue-50 border-blue-200" : "bg-gray-50 border-gray-200"
+                      }`}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          {index === 0 && <Trophy className="h-4 w-4 text-yellow-600" />}
-                          <span className="player-name">{player.name}</span>
-                          {player.id === playerId && (
-                            <Badge variant="outline" className="text-xs">You</Badge>
+                          {player.is_host && (
+                            <Crown className="h-4 w-4 text-yellow-500" />
+                          )}
+                          <span className="font-medium mobile-text-sm truncate">
+                            {player.name}
+                            {player.id === playerId && " (You)"}
+                          </span>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          {player.ready && (
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                          )}
+                          
+                          {player.language && (
+                            <Badge variant="outline" className="mobile-text-sm">
+                              {LANGUAGES.find(l => l.value === player.language)?.label?.split(' ')[0]}
+                            </Badge>
                           )}
                         </div>
-                        {player.language && (
-                          <Badge variant="outline" className="text-xs">
-                            {LANGUAGES.find(l => l.value === player.language)?.label}
-                          </Badge>
-                        )}
                       </div>
-                      <div className="player-score">
-                        {player.score}
+                      
+                      <div className="text-right">
+                        <div className="font-bold mobile-text-sm">
+                          {player.score}
+                        </div>
+                        {room.game_mode !== "cooperation" && (
+                          <div className="mobile-text-sm text-gray-600">
+                            / {room.target_score}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
-              </div>
-            </div>
-          </div>
-        )}
+                </div>
+              </CardContent>
+            </Card>
 
-        {/* Cooperation Mode Gameplay */}
-        {room.game_state === "playing" && room.game_mode === "cooperation" && (
-          <div className="mobile-spacing-md">
-            {/* Cooperation Stats */}
+            {/* Game Info */}
             <Card className="mobile-card">
-              <CardContent className="mobile-padding">
+              <CardHeader className="mobile-padding">
+                <CardTitle className="mobile-text-lg">Game Info</CardTitle>
+              </CardHeader>
+              <CardContent className="mobile-spacing-sm mobile-text-sm mobile-padding">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="text-center">
-                      <div className="mobile-text-2xl font-bold text-purple-600">
-                        {room.cooperation_score || 0}
-                      </div>
-                      <div className="mobile-text-sm text-gray-600">Score</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="mobile-text-2xl font-bold text-red-600">
-                        {"❤️".repeat(room.cooperation_lives || 0)}
-                      </div>
-                      <div className="mobile-text-sm text-gray-600">Lives</div>
-                    </div>
-                    {cooperationChallenge && (
-                      <div className="text-center">
-                        <div className={`cooperation-timer ${cooperationCountdown <= 2 ? 'warning' : 'normal'}`}>
-                          {cooperationCountdown}
-                        </div>
-                        <div className="mobile-text-sm text-gray-600">Timer</div>
-                      </div>
-                    )}
+                  <span className="text-gray-600">Target Score:</span>
+                  <span className="font-medium">
+                    {room.game_mode === "cooperation" ? "Survival" : `${room.target_score} points`}
+                  </span>
+                </div>
+                
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Game Mode:</span>
+                  <span className="font-medium capitalize">{room.game_mode || "Not selected"}</span>
+                </div>
+                
+                {room.host_language && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Language:</span>
+                    <span className="font-medium">
+                      {LANGUAGES.find(l => l.value === room.host_language)?.label}
+                    </span>
                   </div>
-                  <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
-                    <HandHeart className="h-3 w-3 mr-1" />
-                    Cooperation
+                )}
+                
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Status:</span>
+                  <Badge variant="outline" className="mobile-text-sm">
+                    {room.game_state === "lobby" && "Waiting"}
+                    {room.game_state === "playing" && "In Progress"}
+                    {room.game_state === "finished" && "Finished"}
                   </Badge>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Cooperation Challenge */}
-            {isCooperationWaiting ? (
-              <Card className="mobile-card">
-                <CardContent className="flex flex-col items-center justify-center p-8">
-                  <Loader2 className="h-8 w-8 animate-spin text-purple-600 mb-4" />
-                  <h3 className="mobile-text-lg font-semibold mb-2">Preparing Next Challenge...</h3>
-                  <p className="text-gray-600 text-center">Please wait while we set up your next word challenge.</p>
-                </CardContent>
-              </Card>
-            ) : cooperationChallenge ? (
-              <Card className="mobile-card">
-                <CardHeader className="mobile-padding">
-                  <CardTitle className="mobile-text-lg">
-                    Category: {cooperationChallenge.categoryName}
-                  </CardTitle>
-                  <CardDescription className="mobile-text-base">
-                    Type a word in <strong>{LANGUAGES.find(l => l.value === cooperationChallenge.language)?.label}</strong> that belongs to this category
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="mobile-spacing-md mobile-padding">
-                  {room.current_challenge_player === playerId ? (
-                    <div className="mobile-spacing-sm">
-                      <div className="flex gap-2">
-                        <Input
-                          value={cooperationAnswer}
-                          onChange={(e) => handleCooperationTyping(e.target.value)}
-                          placeholder={`Type a ${cooperationChallenge.englishName.toLowerCase()} word...`}
-                          className="flex-1"
-                          onKeyPress={(e) => {
-                            if (e.key === 'Enter') {
-                              handleCooperationSubmit()
-                            }
-                          }}
-                        />
-                        <SoundButton
-                          onClick={handleCooperationSubmit}
-                          disabled={!cooperationAnswer.trim()}
-                          className="mobile-btn-md"
-                        >
-                          Submit
-                        </SoundButton>
-                      </div>
-                      <p className="mobile-text-sm text-gray-600">
-                        Your turn! Type your answer and press Enter or click Submit.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="mobile-spacing-sm">
-                      <div className="p-4 bg-gray-50 rounded-lg border">
-                        <p className="mobile-text-base text-gray-600 text-center">
-                          Waiting for {room.players.find(p => p.id === room.current_challenge_player)?.name} to answer...
-                        </p>
-                        {cooperationTyping && (
-                          <p className="mobile-text-sm text-blue-600 text-center mt-2">
-                            Typing: "{cooperationTyping.text}"
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ) : (
-              <Card className="mobile-card">
-                <CardContent className="flex flex-col items-center justify-center p-8">
-                  <Timer className="h-12 w-12 text-gray-400 mb-4" />
-                  <h3 className="mobile-text-lg font-semibold mb-2">Waiting for Challenge</h3>
-                  <p className="text-gray-600 text-center">The next cooperation challenge will appear here.</p>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Players Display at Bottom */}
+            {/* Game Rules */}
             <Card className="mobile-card">
               <CardHeader className="mobile-padding">
-                <CardTitle className="mobile-text-lg">Players & Languages</CardTitle>
+                <CardTitle className="mobile-text-lg">How to Play</CardTitle>
               </CardHeader>
-              <CardContent className="mobile-padding">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {room.players.map((player) => (
-                    <div
-                      key={player.id}
-                      className={`p-3 border rounded-lg ${
-                        room.current_challenge_player === player.id 
-                          ? 'bg-blue-50 border-blue-200' 
-                          : 'bg-gray-50 border-gray-200'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium mobile-text-base">{player.name}</span>
-                          {player.id === playerId && (
-                            <Badge variant="outline" className="text-xs">You</Badge>
-                          )}
-                          {room.current_challenge_player === player.id && (
-                            <Badge variant="default" className="text-xs bg-blue-600 text-white">
-                              Current Turn
-                            </Badge>
-                          )}
-                        </div>
-                        {player.language && (
-                          <Badge variant="outline" className="text-xs">
-                            {LANGUAGES.find(l => l.value === player.language)?.label}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {/* Game Finished */}
-        {room.game_state === "finished" && (
-          <div className="mobile-spacing-md">
-            <Card className="mobile-card">
-              <CardHeader className="mobile-padding text-center">
-                <CardTitle className="mobile-text-2xl">
-                  {room.game_mode === "cooperation" ? "Game Over!" : "Game Finished!"}
-                </CardTitle>
-                <CardDescription className="mobile-text-lg">
-                  {room.game_mode === "cooperation" 
-                    ? `Final Score: ${room.cooperation_score || 0} words`
-                    : room.winner_id 
-                      ? `${room.players.find(p => p.id === room.winner_id)?.name} wins!`
-                      : "Game completed"
-                  }
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="mobile-spacing-md mobile-padding">
-                {/* Final Scores */}
-                <div className="mobile-spacing-sm">
-                  <h3 className="mobile-text-lg font-semibold mb-3">Final Scores</h3>
-                  {room.players
-                    .sort((a, b) => b.score - a.score)
-                    .map((player, index) => (
-                      <div
-                        key={player.id}
-                        className="flex items-center justify-between p-3 border rounded-lg"
-                      >
-                        <div className="flex items-center gap-3">
-                          {index === 0 && room.game_mode !== "cooperation" && (
-                            <Trophy className="h-5 w-5 text-yellow-600" />
-                          )}
-                          <span className="font-medium mobile-text-base">{player.name}</span>
-                          {player.id === playerId && (
-                            <Badge variant="outline" className="text-xs">You</Badge>
-                          )}
-                        </div>
-                        <Badge variant="outline" className="mobile-text-sm">
-                          {player.score} points
-                        </Badge>
-                      </div>
-                    ))}
-                </div>
-
-                {/* Restart Button (Host Only) */}
-                {isCurrentPlayerHost && (
-                  <div className="flex justify-center">
-                    <SoundButton
-                      onClick={handleRestart}
-                      className="mobile-btn-lg px-8"
-                    >
-                      <RotateCcw className="h-5 w-5 mr-2" />
-                      Play Again
-                    </SoundButton>
+              <CardContent className="mobile-spacing-sm mobile-text-sm mobile-padding">
+                {room.game_mode === "practice" && (
+                  <div className="mobile-spacing-sm">
+                    <p className="font-medium text-blue-600">Practice Mode:</p>
+                    <ul className="mobile-spacing-sm text-gray-600 ml-4">
+                      <li>• Each player chooses their own language</li>
+                      <li>• No point penalties for wrong answers</li>
+                      <li>• First to reach target score wins</li>
+                      <li>• Perfect for learning and practice</li>
+                    </ul>
                   </div>
+                )}
+                
+                {room.game_mode === "competition" && (
+                  <div className="mobile-spacing-sm">
+                    <p className="font-medium text-orange-600">Competition Mode:</p>
+                    <ul className="mobile-spacing-sm text-gray-600 ml-4">
+                      <li>• All players use the same language</li>
+                      <li>• Wrong answers lose 5 points</li>
+                      <li>• First to reach target score wins</li>
+                      <li>• Competitive and challenging</li>
+                    </ul>
+                  </div>
+                )}
+                
+                {room.game_mode === "cooperation" && (
+                  <div className="mobile-spacing-sm">
+                    <p className="font-medium text-purple-600">Cooperation Mode:</p>
+                    <ul className="mobile-spacing-sm text-gray-600 ml-4">
+                      <li>• Exactly 2 players required</li>
+                      <li>• Type words from given categories</li>
+                      <li>• Share 3 lives between players</li>
+                      <li>• Work together to survive</li>
+                    </ul>
+                  </div>
+                )}
+                
+                {!room.game_mode && (
+                  <p className="text-gray-600">
+                    {isCurrentPlayerHost 
+                      ? "Choose a game mode to get started!" 
+                      : "Waiting for host to select game mode..."
+                    }
+                  </p>
                 )}
               </CardContent>
             </Card>
           </div>
-        )}
+        </div>
       </div>
     </div>
   )
