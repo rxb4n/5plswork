@@ -247,6 +247,9 @@ export default function RoomPage() {
         }
         
         // Debounce question loading by 300ms
+        questionUpdateTimeoutRef.current = setTimeout(() => {
+          loadQuestion(updatedRoom)
+        }, 300)
       }
     })
 
@@ -550,7 +553,7 @@ export default function RoomPage() {
       if (room?.game_state === "playing") {
         loadQuestion(room)
       }
-    }, 0)
+    }, 1000)
   }
 
   // Handle language selection
