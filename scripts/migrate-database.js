@@ -2,15 +2,33 @@ const { Pool } = require('pg');
 
 // Database migration script to add missing columns
 async function migrateDatabase() {
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  });
+  // Check if DATABASE_URL is provided
+  if (!process.env.DATABASE_URL) {
+    console.log('⚠️  DATABASE_URL environment variable is not set');
+    console.log('📝 To run database migrations, you need to:');
+    console.log('   1. Set up your Supabase project');
+    console.log('   2. Add DATABASE_URL to your environment variables');
+    console.log('   3. Run this migration script again');
+    console.log('');
+    console.log('💡 If you\'re using Supabase, your DATABASE_URL should look like:');
+    console.log('   postgresql://postgres:[password]@[host]:5432/postgres');
+    return;
+  }
 
-  const client = await pool.connect();
+  let pool;
+  let client;
   
   try {
     console.log('🔧 Starting database migration...');
+    console.log('🔗 Connecting to database...');
+    
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    });
+
+    client = await pool.connect();
+    console.log('✅ Database connection established');
     
     // Begin transaction
     await client.query('BEGIN');
@@ -70,13 +88,37 @@ async function migrateDatabase() {
     });
     
   } catch (error) {
-    // Rollback on error
-    await client.query('ROLLBACK');
-    console.error('❌ Migration failed:', error);
+    // Rollback on error if client exists
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('❌ Error during rollback:', rollbackError.message);
+      }
+    }
+    
+    if (error.code === 'ECONNREFUSED') {
+      console.error('❌ Database connection refused');
+      console.log('');
+      console.log('🔧 Troubleshooting steps:');
+      console.log('   1. Verify your DATABASE_URL is correct');
+      console.log('   2. Ensure your database server is running and accessible');
+      console.log('   3. Check if you need to whitelist your IP address');
+      console.log('   4. For Supabase: verify your connection string from the dashboard');
+    } else if (error.code === 'ENOTFOUND') {
+      console.error('❌ Database host not found');
+      console.log('   Check your DATABASE_URL host address');
+    } else {
+      console.error('❌ Migration failed:', error.message);
+    }
     throw error;
   } finally {
-    client.release();
-    await pool.end();
+    if (client) {
+      client.release();
+    }
+    if (pool) {
+      await pool.end();
+    }
   }
 }
 
@@ -88,7 +130,7 @@ if (require.main === module) {
       process.exit(0);
     })
     .catch((error) => {
-      console.error('❌ Migration script failed:', error);
+      console.error('❌ Migration script failed');
       process.exit(1);
     });
 }
