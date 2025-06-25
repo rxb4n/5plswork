@@ -10,6 +10,9 @@ import {
   removePlayerFromRoom,
   cleanupOldRooms,
   cleanupEmptyRooms,
+  cleanupInactiveRooms,
+  clearAllRooms,
+  updateRoomActivity,
   type Player,
 } from "../../lib/database"
 
@@ -29,6 +32,13 @@ async function ensureDbInitialized() {
   }
 }
 
+// Room activity tracking
+const roomActivityTracker = new Map<string, {
+  lastActivity: Date
+  warningIssued: boolean
+  players: Set<string>
+}>()
+
 // CRITICAL: This is the default export that Next.js requires
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // CRITICAL: Ensure Socket.IO server is only initialized once
@@ -37,12 +47,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     console.log("🚀 Initializing Socket.IO server...")
 
+    // STEP 1: Clear all existing rooms immediately
+    console.log("🧹 Clearing all existing rooms from system...");
+    const clearedRooms = await clearAllRooms();
+    console.log(`✅ Cleared ${clearedRooms} existing rooms`);
+
     const io = new SocketIOServer(res.socket.server, {
       path: "/api/socketio",
       addTrailingSlash: false,
-      // CRITICAL: Namespace configuration
       serveClient: false,
-      // CORS configuration
       cors: {
         origin: process.env.NODE_ENV === "production" 
           ? [
@@ -53,7 +66,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         methods: ["GET", "POST"],
         credentials: true,
       },
-      // Transport configuration for Render.com
       transports: ["polling"],
       allowUpgrades: false,
       allowEIO3: true,
@@ -61,69 +73,144 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       pingInterval: 25000,
       upgradeTimeout: 30000,
       maxHttpBufferSize: 1e6,
-      // Additional configuration for cloud platforms
       cookie: false,
       perMessageDeflate: false,
       httpCompression: false,
     })
 
-    // CRITICAL: Enhanced error handling for namespace issues
+    // Enhanced error handling
     io.engine.on("connection_error", (err) => {
       console.log("❌ Socket.IO Engine connection error:")
       console.log("  - Request URL:", err.req?.url)
       console.log("  - Request method:", err.req?.method)
-      console.log("  - Request headers:", JSON.stringify(err.req?.headers, null, 2))
       console.log("  - Error code:", err.code)
       console.log("  - Error message:", err.message)
-      console.log("  - Error context:", err.context)
-      console.log("  - Error type:", err.type)
       
-      // Log namespace-specific errors
       if (err.message && err.message.includes("namespace")) {
         console.log("🚨 NAMESPACE ERROR DETECTED:")
         console.log("  - This is likely a client-side namespace configuration issue")
-        console.log("  - Check that client is connecting to the correct namespace")
-        console.log("  - Ensure no trailing slashes or incorrect paths")
       }
     })
 
-    // Enhanced connection logging
-    io.engine.on("initial_headers", (headers, req) => {
-      console.log("📋 Socket.IO Initial headers for:", req.url)
-      console.log("  - User-Agent:", req.headers['user-agent'])
-      console.log("  - Origin:", req.headers.origin)
-      console.log("  - Referer:", req.headers.referer)
-    })
+    // STEP 2: Set up automatic room cleanup mechanism
+    console.log("🔧 Setting up automatic room cleanup mechanism...");
 
-    // Log all incoming connections with detailed info
-    io.engine.on("connection", (socket) => {
-      console.log("🔌 Engine connection established:")
-      console.log("  - Socket ID:", socket.id)
-      console.log("  - Transport:", socket.transport.name)
-      console.log("  - Request URL:", socket.request.url)
-      console.log("  - Request headers:", JSON.stringify(socket.request.headers, null, 2))
-    })
+    // Function to update room activity
+    function updateRoomActivityTracker(roomId: string, playerId?: string) {
+      const now = new Date();
+      const existing = roomActivityTracker.get(roomId);
 
-    // Schedule periodic room cleanup (every 10 minutes)
-    setInterval(async () => {
-      try {
-        await cleanupOldRooms(io)
-        const emptyRoomsDeleted = await cleanupEmptyRooms(io)
-        if (emptyRoomsDeleted > 0) {
-          broadcastAvailableRooms(io)
+      if (existing) {
+        existing.lastActivity = now;
+        existing.warningIssued = false;
+        if (playerId) {
+          existing.players.add(playerId);
         }
-      } catch (error) {
-        console.error("Failed to cleanup old rooms:", error)
+      } else {
+        roomActivityTracker.set(roomId, {
+          lastActivity: now,
+          warningIssued: false,
+          players: new Set(playerId ? [playerId] : [])
+        });
       }
-    }, 10 * 60 * 1000)
 
-    // CRITICAL: Main connection handler with namespace validation
+      // Also update database timestamp
+      updateRoomActivity(roomId).catch(err => {
+        console.error(`Failed to update room activity in DB for ${roomId}:`, err);
+      });
+
+      console.log(`📊 Activity updated for room ${roomId} (${roomActivityTracker.get(roomId)?.players.size || 0} tracked players)`);
+    }
+
+    // Function to issue inactivity warning
+    async function issueInactivityWarning(roomId: string) {
+      const warningMessage = {
+        type: "inactivity_warning",
+        message: "⚠️ Room will be closed in 30 seconds due to inactivity",
+        countdown: 30,
+        timestamp: new Date().toISOString()
+      };
+
+      io.to(roomId).emit("room-warning", warningMessage);
+      console.log(`⚠️ Inactivity warning sent to room ${roomId}`);
+    }
+
+    // STEP 3: Periodic cleanup process (every 60 seconds)
+    const cleanupInterval = setInterval(async () => {
+      try {
+        const now = new Date();
+        const INACTIVITY_THRESHOLD = 120000; // 120 seconds
+        const WARNING_THRESHOLD = 90000; // 90 seconds
+
+        console.log(`🔍 Checking ${roomActivityTracker.size} rooms for activity...`);
+
+        // Check tracked rooms for inactivity
+        for (const [roomId, activity] of roomActivityTracker.entries()) {
+          const timeSinceLastActivity = now.getTime() - activity.lastActivity.getTime();
+
+          // Issue warning at 90 seconds
+          if (timeSinceLastActivity > WARNING_THRESHOLD && !activity.warningIssued) {
+            await issueInactivityWarning(roomId);
+            activity.warningIssued = true;
+          }
+
+          // Remove room at 120 seconds
+          if (timeSinceLastActivity > INACTIVITY_THRESHOLD) {
+            console.log(`🚨 Room ${roomId} inactive for ${Math.round(timeSinceLastActivity / 1000)}s, removing`);
+            
+            // Notify clients
+            io.to(roomId).emit("room-closed", {
+              type: "inactivity_cleanup",
+              message: "Room closed due to inactivity",
+              reason: "inactivity",
+              timestamp: new Date().toISOString()
+            });
+
+            // Remove from tracking
+            roomActivityTracker.delete(roomId);
+          }
+        }
+
+        // Database cleanup for inactive rooms
+        const cleanedInactive = await cleanupInactiveRooms(io, INACTIVITY_THRESHOLD);
+        if (cleanedInactive > 0) {
+          console.log(`🧹 Database cleanup: ${cleanedInactive} inactive rooms removed`);
+          broadcastAvailableRooms(io);
+        }
+
+        // Cleanup empty rooms
+        const cleanedEmpty = await cleanupEmptyRooms(io);
+        if (cleanedEmpty > 0) {
+          console.log(`🧹 Database cleanup: ${cleanedEmpty} empty rooms removed`);
+          broadcastAvailableRooms(io);
+        }
+
+        // Cleanup old rooms (fallback)
+        await cleanupOldRooms(io);
+
+      } catch (error) {
+        console.error("❌ Error during periodic cleanup:", error);
+      }
+    }, 60000); // Run every 60 seconds
+
+    console.log("✅ Automatic cleanup mechanism started (checking every 60 seconds)");
+
+    // Cleanup on server shutdown
+    process.on('SIGTERM', () => {
+      console.log('🛑 Shutting down cleanup interval...');
+      clearInterval(cleanupInterval);
+    });
+
+    process.on('SIGINT', () => {
+      console.log('🛑 Shutting down cleanup interval...');
+      clearInterval(cleanupInterval);
+    });
+
+    // Main connection handler
     io.on("connection", (socket) => {
       console.log("✅ Socket.IO client connected successfully:")
       console.log("  - Socket ID:", socket.id)
       console.log("  - Transport:", socket.conn.transport.name)
-      console.log("  - Namespace:", socket.nsp.name)
-      console.log("  - Handshake:", JSON.stringify(socket.handshake, null, 2))
 
       // Validate namespace
       if (socket.nsp.name !== "/") {
@@ -138,26 +225,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return
       }
 
-      // Enhanced connection event logging
-      socket.conn.on("upgrade", () => {
-        console.log("⬆️ Socket upgraded to:", socket.conn.transport.name)
-      })
-
-      socket.conn.on("upgradeError", (err) => {
-        console.log("❌ Socket upgrade error:", err)
-      })
-
-      socket.on("connect_error", (error) => {
-        console.error("❌ Client connection error:", error)
-      })
-
-      // Emit connection success event
       socket.emit("connection-success", { 
         socketId: socket.id,
         transport: socket.conn.transport.name,
         namespace: socket.nsp.name
       })
 
+      // STEP 4: Track room activity on all player interactions
       socket.on("create-room", async ({ roomId, playerId, data }, callback) => {
         try {
           console.log(`🏠 Creating room ${roomId} with target score ${data?.targetScore}`)
@@ -167,9 +241,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Failed to create room", status: 500 })
           }
           socket.join(roomId)
+          
+          // Track room activity
+          updateRoomActivityTracker(roomId, playerId)
+          
           callback({ room })
           io.to(roomId).emit("room-update", { room })
-          
           broadcastAvailableRooms(io)
           
           console.log(`✅ Room ${roomId} created successfully`)
@@ -209,16 +286,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Failed to join room", status: 500 })
           }
           socket.join(roomId)
+          
+          // Track room activity
+          updateRoomActivityTracker(roomId, playerId)
+          
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
-          
           broadcastAvailableRooms(io)
           
           console.log(`✅ Player ${playerId} joined room ${roomId}`)
         } catch (error) {
           console.error(`❌ Error joining room ${roomId}:`, error)
           callback({ error: "Failed to join room", status: 500 })
+        }
+      })
+
+      // NEW: Handle activity pings to keep rooms alive
+      socket.on("room-activity-ping", ({ roomId, playerId }) => {
+        if (roomId && playerId) {
+          updateRoomActivityTracker(roomId, playerId)
         }
       })
 
@@ -245,6 +332,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           if (!player || !player.is_host) {
             return callback({ error: "Only the room creator can update the game mode", status: 403 })
           }
+          
+          // Track room activity
+          updateRoomActivityTracker(roomId, playerId)
+          
           const success = await updateRoom(roomId, { game_mode: data.gameMode })
           if (!success) {
             return callback({ error: "Failed to update game mode", status: 500 })
@@ -252,7 +343,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
-          
           broadcastAvailableRooms(io)
           
           console.log(`✅ Game mode updated to ${data.gameMode}`)
@@ -273,6 +363,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           if (!player || !player.is_host) {
             return callback({ error: "Only the room creator can update the host language", status: 403 })
           }
+          
+          // Track room activity
+          updateRoomActivityTracker(roomId, playerId)
+          
           const success = await updateRoom(roomId, { host_language: data.hostLanguage })
           if (!success) {
             return callback({ error: "Failed to update host language", status: 500 })
@@ -280,7 +374,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
-          
           broadcastAvailableRooms(io)
           
           console.log(`✅ Host language updated to ${data.hostLanguage}`)
@@ -301,6 +394,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           if (!player) {
             return callback({ error: "Player not found", status: 404 })
           }
+          
+          // Track room activity
+          updateRoomActivityTracker(roomId, playerId)
+          
           const shouldResetReady = !player.language
           const success = await updatePlayer(playerId, {
             language: data.language,
@@ -342,6 +439,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Game mode must be selected first", status: 400 })
           }
           
+          // Track room activity
+          updateRoomActivityTracker(roomId, playerId)
+          
           const success = await updatePlayer(playerId, { ready: !player.ready })
           if (!success) {
             return callback({ error: "Failed to toggle ready status", status: 500 })
@@ -371,6 +471,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           if (![100, 250, 500].includes(targetScore)) {
             return callback({ error: "Invalid target score", status: 400 })
           }
+          
+          // Track room activity
+          updateRoomActivityTracker(roomId, playerId)
+          
           const success = await updateRoom(roomId, { target_score: targetScore })
           if (!success) {
             return callback({ error: "Failed to update target score", status: 500 })
@@ -432,6 +536,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
           console.log(`✅ All requirements met - starting game with ${room.players.length} players`)
 
+          // Track room activity
+          updateRoomActivityTracker(roomId, playerId)
+
           const roomUpdateSuccess = await updateRoom(roomId, { game_state: "playing", question_count: 0 })
           if (!roomUpdateSuccess) {
             console.log(`❌ Failed to update room state`)
@@ -443,7 +550,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
-          
           broadcastAvailableRooms(io)
         } catch (error) {
           console.error(`❌ Error starting game for room ${roomId}:`, error)
@@ -484,6 +590,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             console.log(`❌ Wrong answer in practice mode - no penalty`)
           }
           
+          // Track room activity
+          updateRoomActivityTracker(roomId, playerId)
+          
           await updatePlayer(playerId, { score: newScore })
           
           if (newScore >= room.target_score && newScore > 0) {
@@ -492,7 +601,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             const finalRoom = await getRoom(roomId)
             callback({ room: finalRoom })
             io.to(roomId).emit("room-update", { room: finalRoom })
-            
             broadcastAvailableRooms(io)
             return
           }
@@ -520,6 +628,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
           console.log(`🔄 Restarting game in room ${roomId}`)
           
+          // Track room activity
+          updateRoomActivityTracker(roomId, playerId)
+          
           await updateRoom(roomId, {
             game_state: "lobby",
             game_mode: null,
@@ -536,7 +647,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
-          
           broadcastAvailableRooms(io)
           
           console.log(`✅ Game restarted in room ${roomId}`)
@@ -549,6 +659,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       socket.on("leave-room", async ({ roomId, playerId }) => {
         try {
           console.log(`🚪 Player ${playerId} leaving room ${roomId}`)
+          
+          // Remove from activity tracking
+          const activity = roomActivityTracker.get(roomId)
+          if (activity) {
+            activity.players.delete(playerId)
+            if (activity.players.size === 0) {
+              roomActivityTracker.delete(roomId)
+            }
+          }
           
           const { roomId: actualRoomId, wasHost, roomDeleted } = await removePlayerFromRoom(playerId, io)
           
@@ -596,7 +715,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         console.log("🔌 Socket.IO client disconnected:", socket.id, "Reason:", reason)
       })
 
-      // CRITICAL: Handle namespace-related errors
       socket.on("error", (error) => {
         console.error("❌ Socket error:", error)
         if (error.message && error.message.includes("namespace")) {
@@ -611,7 +729,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     })
 
     res.socket.server.io = io
-    console.log("✅ Socket.IO server initialized successfully with namespace validation")
+    console.log("✅ Socket.IO server initialized successfully with comprehensive cleanup system")
   } else {
     console.log("🔄 Socket.IO server already initialized, skipping...")
   }

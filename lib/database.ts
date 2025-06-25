@@ -145,11 +145,62 @@ export async function initDatabase() {
   }
 }
 
+// NEW: Clear all existing rooms from the system
+export async function clearAllRooms(io?: SocketIOServer): Promise<number> {
+  const client = await pool.connect();
+  try {
+    console.log("🧹 Starting complete room cleanup...");
+
+    // Get all existing rooms before deletion
+    const existingRoomsResult = await client.query("SELECT id FROM rooms");
+    const roomIds = existingRoomsResult.rows.map(row => row.id);
+
+    if (roomIds.length === 0) {
+      console.log("✅ No existing rooms to clear");
+      return 0;
+    }
+
+    console.log(`🗑️ Found ${roomIds.length} existing rooms to clear:`, roomIds);
+
+    // Notify all clients in these rooms if Socket.IO is available
+    if (io) {
+      roomIds.forEach(roomId => {
+        io.to(roomId).emit("room-closed", {
+          type: "system_cleanup",
+          message: "System maintenance: All rooms have been cleared",
+          reason: "system_restart",
+          timestamp: new Date().toISOString()
+        });
+
+        io.to(roomId).emit("error", {
+          message: "Room closed due to system maintenance",
+          status: 503,
+          reason: "system_cleanup"
+        });
+
+        // Disconnect all sockets in the room
+        io.in(roomId).disconnectSockets(true);
+      });
+    }
+
+    // Delete all rooms (CASCADE will handle players)
+    const deleteResult = await client.query("DELETE FROM rooms");
+    
+    console.log(`✅ Cleared ${deleteResult.rowCount} rooms from database`);
+    return deleteResult.rowCount;
+  } catch (error) {
+    console.error("❌ Error clearing all rooms:", error);
+    return 0;
+  } finally {
+    client.release();
+  }
+}
+
 // Room operations
 export async function createRoom(roomId: string, options: { target_score?: number } = { target_score: 100 }): Promise<Room | null> {
   const client = await pool.connect();
   try {
-    await client.query("INSERT INTO rooms (id, target_score) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING", [roomId, options.target_score || 100]);
+    await client.query("INSERT INTO rooms (id, target_score, last_activity) VALUES ($1, $2, NOW()) ON CONFLICT (id) DO NOTHING", [roomId, options.target_score || 100]);
     console.log(`Created room ${roomId} with target_score ${options.target_score || 100}`);
     return await getRoom(roomId);
   } catch (error) {
@@ -242,7 +293,7 @@ export async function addPlayerToRoom(roomId: string, player: Omit<Player, "last
       ]
     );
 
-    // Update room activity
+    // Update room activity timestamp
     await client.query("UPDATE rooms SET last_activity = NOW() WHERE id = $1", [roomId]);
 
     // Ensure one host
@@ -296,6 +347,20 @@ export async function ensureRoomHasHost(roomId: string, client?: PoolClient): Pr
   }
 }
 
+// NEW: Update room activity timestamp
+export async function updateRoomActivity(roomId: string): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    const result = await client.query("UPDATE rooms SET last_activity = NOW() WHERE id = $1", [roomId]);
+    return result.rowCount > 0;
+  } catch (error) {
+    console.error(`Error updating room activity for ${roomId}:`, error);
+    return false;
+  } finally {
+    client.release();
+  }
+}
+
 export async function updatePlayer(playerId: string, updates: Partial<Player>): Promise<boolean> {
   const client = await pool.connect();
   try {
@@ -329,6 +394,13 @@ export async function updatePlayer(playerId: string, updates: Partial<Player>): 
     
     const result = await client.query(query, values);
     console.log(`✅ Update result for player ${playerId}: ${result.rowCount} rows affected`);
+
+    // Update room activity when player is updated
+    const playerRoomResult = await client.query("SELECT room_id FROM players WHERE id = $1", [playerId]);
+    if (playerRoomResult.rows.length > 0) {
+      const roomId = playerRoomResult.rows[0].room_id;
+      await client.query("UPDATE rooms SET last_activity = NOW() WHERE id = $1", [roomId]);
+    }
 
     // If we're updating host status, ensure room has proper host
     if (updates.hasOwnProperty("is_host")) {
@@ -391,7 +463,7 @@ export async function updateRoom(roomId: string, updates: Partial<Omit<Room, "pl
 export async function deleteRoom(roomId: string): Promise<boolean> {
   const client = await pool.connect();
   try {
-    console.log(`🗑️ Deleting empty room ${roomId}`);
+    console.log(`🗑️ Deleting room ${roomId}`);
     const result = await client.query("DELETE FROM rooms WHERE id = $1", [roomId]);
     console.log(`✅ Room ${roomId} deleted successfully (${result.rowCount} rows affected)`);
     return true;
@@ -447,6 +519,8 @@ export async function removePlayerFromRoom(playerId: string, io?: SocketIOServer
       if (wasHost) {
         await ensureRoomHasHost(roomId, client);
       }
+      // Update room activity
+      await client.query("UPDATE rooms SET last_activity = NOW() WHERE id = $1", [roomId]);
     }
 
     await client.query("COMMIT");
@@ -460,10 +534,91 @@ export async function removePlayerFromRoom(playerId: string, io?: SocketIOServer
   }
 }
 
+// NEW: Find and cleanup inactive rooms
+export async function cleanupInactiveRooms(io?: SocketIOServer, inactivityThresholdMs: number = 120000): Promise<number> {
+  const client = await pool.connect();
+  try {
+    console.log(`🔍 Checking for rooms inactive for more than ${inactivityThresholdMs / 1000} seconds...`);
+
+    // Find rooms that have been inactive for the threshold period
+    const inactiveRoomsResult = await client.query(`
+      SELECT r.id, r.last_activity, COUNT(p.id) as player_count
+      FROM rooms r
+      LEFT JOIN players p ON r.id = p.room_id
+      WHERE r.last_activity < NOW() - INTERVAL '${inactivityThresholdMs} milliseconds'
+      GROUP BY r.id, r.last_activity
+      ORDER BY r.last_activity ASC
+    `);
+
+    if (inactiveRoomsResult.rows.length === 0) {
+      console.log("✅ No inactive rooms found");
+      return 0;
+    }
+
+    console.log(`🚨 Found ${inactiveRoomsResult.rows.length} inactive rooms:`);
+    inactiveRoomsResult.rows.forEach(row => {
+      const inactiveFor = Date.now() - new Date(row.last_activity).getTime();
+      console.log(`  - Room ${row.id}: ${row.player_count} players, inactive for ${Math.round(inactiveFor / 1000)}s`);
+    });
+
+    let cleanedUpCount = 0;
+
+    // Process each inactive room
+    for (const roomRow of inactiveRoomsResult.rows) {
+      const roomId = roomRow.id;
+      const playerCount = parseInt(roomRow.player_count);
+
+      try {
+        console.log(`🧹 Cleaning up inactive room ${roomId} (${playerCount} players)...`);
+
+        // Notify all clients in the room
+        if (io) {
+          io.to(roomId).emit("room-closed", {
+            type: "inactivity_cleanup",
+            message: "Room closed due to inactivity",
+            reason: "inactivity",
+            timestamp: new Date().toISOString()
+          });
+
+          io.to(roomId).emit("error", {
+            message: "Room closed due to inactivity",
+            status: 408,
+            reason: "timeout"
+          });
+
+          // Disconnect all sockets in the room
+          io.in(roomId).disconnectSockets(true);
+        }
+
+        // Delete the room (CASCADE will handle players)
+        const deleteResult = await client.query("DELETE FROM rooms WHERE id = $1", [roomId]);
+        
+        if (deleteResult.rowCount > 0) {
+          cleanedUpCount++;
+          console.log(`✅ Inactive room ${roomId} cleaned up successfully`);
+        }
+
+      } catch (error) {
+        console.error(`❌ Error cleaning up room ${roomId}:`, error);
+      }
+    }
+
+    console.log(`🧹 Cleanup completed: ${cleanedUpCount} inactive rooms removed`);
+    return cleanedUpCount;
+
+  } catch (error) {
+    console.error("❌ Error during inactive room cleanup:", error);
+    return 0;
+  } finally {
+    client.release();
+  }
+}
+
 // Cleanup old rooms (for scheduled cleanup)
 export async function cleanupOldRooms(io?: SocketIOServer): Promise<void> {
   const client = await pool.connect();
   try {
+    // Delete rooms older than 4 hours or inactive for 1 hour
     const result = await client.query(`
       DELETE FROM rooms 
       WHERE created_at < NOW() - INTERVAL '4 hours'
@@ -485,7 +640,7 @@ export async function cleanupOldRooms(io?: SocketIOServer): Promise<void> {
   }
 }
 
-// NEW: Clean up empty rooms immediately
+// Clean up empty rooms immediately
 export async function cleanupEmptyRooms(io?: SocketIOServer): Promise<number> {
   const client = await pool.connect();
   try {
