@@ -12,9 +12,11 @@ import {
   cleanupEmptyRooms,
   type Player,
 } from "../../lib/database"
+import { RoomActivityMonitor } from "../../lib/room-monitor"
 
 // Initialize database on startup
 let dbInitialized = false
+let roomMonitor: RoomActivityMonitor | null = null
 
 async function ensureDbInitialized() {
   if (!dbInitialized) {
@@ -60,6 +62,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       perMessageDeflate: false,
       httpCompression: false,
     })
+
+    // Initialize room activity monitor
+    roomMonitor = new RoomActivityMonitor(io)
 
     io.engine.on("connection_error", (err) => {
       console.log("❌ Socket.IO Engine connection error:")
@@ -107,6 +112,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }, 10 * 60 * 1000)
 
+    // Enhanced monitoring stats logging (every 5 minutes)
+    setInterval(() => {
+      if (roomMonitor) {
+        const stats = roomMonitor.getMonitoringStats()
+        console.log("📊 Room Monitor Stats:", {
+          totalRooms: stats.totalRooms,
+          roomsWithWarnings: stats.roomsWithWarnings,
+          oldestActivity: stats.oldestActivity?.toISOString(),
+          newestActivity: stats.newestActivity?.toISOString()
+        })
+      }
+    }, 5 * 60 * 1000)
+
     io.on("connection", (socket) => {
       console.log("✅ Socket.IO client connected successfully:")
       console.log("  - Socket ID:", socket.id)
@@ -144,6 +162,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         namespace: socket.nsp.name
       })
 
+      // Helper function to update room activity
+      const updateActivity = (roomId: string, playerId?: string) => {
+        if (roomMonitor) {
+          roomMonitor.updateRoomActivity(roomId, playerId)
+        }
+      }
+
       socket.on("create-room", async ({ roomId, playerId, data }, callback) => {
         try {
           console.log(`🏠 Creating room ${roomId} with target score ${data?.targetScore}`)
@@ -153,6 +178,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Failed to create room", status: 500 })
           }
           socket.join(roomId)
+          
+          // Add room to activity monitoring
+          if (roomMonitor) {
+            roomMonitor.addRoomToTracking(roomId, [playerId])
+          }
+          
           callback({ room })
           io.to(roomId).emit("room-update", { room })
           
@@ -195,6 +226,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Failed to join room", status: 500 })
           }
           socket.join(roomId)
+          
+          // Update activity monitoring
+          if (roomMonitor) {
+            roomMonitor.handlePlayerJoin(roomId, playerId)
+          }
+          
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
@@ -220,10 +257,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // NEW: Game mode selection
       socket.on("update-game-mode", async ({ roomId, playerId, data }, callback) => {
         try {
           console.log(`🎮 Updating game mode for room ${roomId} to ${data.gameMode}`)
+          updateActivity(roomId, playerId)
+          
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
@@ -250,10 +288,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // NEW: Host language selection (for competition mode)
       socket.on("update-host-language", async ({ roomId, playerId, data }, callback) => {
         try {
           console.log(`🌐 Updating host language for room ${roomId} to ${data.hostLanguage}`)
+          updateActivity(roomId, playerId)
+          
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
@@ -286,6 +325,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       socket.on("update-language", async ({ roomId, playerId, data }, callback) => {
         try {
           console.log(`🌐 Updating language for player ${playerId} to ${data.language}`)
+          updateActivity(roomId, playerId)
+          
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
@@ -318,6 +359,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       socket.on("toggle-ready", async ({ roomId, playerId }, callback) => {
         try {
           console.log(`⚡ Toggling ready for player ${playerId}`)
+          updateActivity(roomId, playerId)
+          
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
@@ -355,6 +398,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       socket.on("update-target-score", async ({ roomId, playerId, data }, callback) => {
         try {
           console.log(`🎯 Updating target score for room ${roomId} to ${data.targetScore}`)
+          updateActivity(roomId, playerId)
+          
           const room = await getRoom(roomId)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
@@ -384,6 +429,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       socket.on("start-game", async ({ roomId, playerId }, callback) => {
         try {
           console.log(`🎮 Starting game - Room: ${roomId}, Host: ${playerId}`)
+          updateActivity(roomId, playerId)
           
           const room = await getRoom(roomId)
           if (!room) {
@@ -434,6 +480,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Failed to start game", status: 500 })
           }
 
+          // Update activity monitoring for game state change
+          if (roomMonitor) {
+            roomMonitor.handleRoomStateChange(roomId, "playing")
+          }
+
           const updatedRoom = await getRoom(roomId)
           console.log(`✅ Game started successfully in ${room.game_mode} mode`)
 
@@ -450,6 +501,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       socket.on("answer", async ({ roomId, playerId, data }, callback) => {
         try {
           console.log(`📝 Processing answer for player ${playerId}`)
+          updateActivity(roomId, playerId)
           
           const room = await getRoom(roomId)
           if (!room) {
@@ -485,6 +537,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           if (newScore >= room.target_score && newScore > 0) {
             console.log(`🏆 Player ${playerId} reached target score ${room.target_score}`)
             await updateRoom(roomId, { game_state: "finished", winner_id: playerId })
+            
+            // Update activity monitoring for game state change
+            if (roomMonitor) {
+              roomMonitor.handleRoomStateChange(roomId, "finished")
+            }
+            
             const finalRoom = await getRoom(roomId)
             callback({ room: finalRoom })
             io.to(roomId).emit("room-update", { room: finalRoom })
@@ -515,6 +573,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
 
           console.log(`🔄 Restarting game in room ${roomId}`)
+          updateActivity(roomId, playerId)
           
           await updateRoom(roomId, {
             game_state: "lobby",
@@ -527,6 +586,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           
           for (const p of room.players) {
             await updatePlayer(p.id, { score: 0, ready: false, language: null })
+          }
+
+          // Update activity monitoring for game state change
+          if (roomMonitor) {
+            roomMonitor.handleRoomStateChange(roomId, "lobby")
           }
 
           const updatedRoom = await getRoom(roomId)
@@ -555,8 +619,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           
           socket.leave(actualRoomId)
           
+          // Update activity monitoring
+          if (roomMonitor) {
+            roomMonitor.handlePlayerLeave(actualRoomId, playerId)
+          }
+          
           if (roomDeleted) {
             console.log(`🗑️ Room ${actualRoomId} was automatically deleted (empty)`)
+            if (roomMonitor) {
+              roomMonitor.removeRoomFromTracking(actualRoomId)
+            }
             broadcastAvailableRooms(io)
             return
           }
@@ -565,6 +637,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           
           if (!room) {
             console.log(`⚠️ Room ${actualRoomId} no longer exists after player removal`)
+            if (roomMonitor) {
+              roomMonitor.removeRoomFromTracking(actualRoomId)
+            }
             broadcastAvailableRooms(io)
             return
           }
@@ -590,6 +665,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       socket.on("disconnect", async (reason) => {
         console.log("🔌 Socket.IO client disconnected:", socket.id, "Reason:", reason)
+        
+        // Clean up any room tracking for this socket
+        if (roomMonitor) {
+          // Note: We don't have direct socket-to-player mapping, 
+          // but the database cleanup will handle orphaned players
+        }
       })
 
       socket.on("error", (error) => {
@@ -603,10 +684,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           })
         }
       })
+
+      // NEW: Handle room activity ping (for keeping rooms alive)
+      socket.on("room-activity-ping", ({ roomId, playerId }) => {
+        if (roomMonitor && roomId && playerId) {
+          roomMonitor.updateRoomActivity(roomId, playerId)
+          console.log(`📡 Activity ping received for room ${roomId} from player ${playerId}`)
+        }
+      })
+
+      // NEW: Get room activity status (for debugging/admin)
+      socket.on("get-room-activity", ({ roomId }, callback) => {
+        if (roomMonitor && roomId) {
+          const activity = roomMonitor.getRoomActivity(roomId)
+          callback({ activity })
+        } else {
+          callback({ activity: null })
+        }
+      })
     })
 
     res.socket.server.io = io
-    console.log("✅ Socket.IO server initialized successfully with game mode support")
+    console.log("✅ Socket.IO server initialized successfully with room activity monitoring")
   } else {
     console.log("🔄 Socket.IO server already initialized, skipping...")
   }
