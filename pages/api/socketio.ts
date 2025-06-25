@@ -40,18 +40,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       addTrailingSlash: false,
       cors: {
         origin: process.env.NODE_ENV === "production" 
-          ? ["https://oneplswork.onrender.com", "https://*.onrender.com"]
+          ? ["https://oneplswork.onrender.com", "https://*.onrender.com", "wss://oneplswork.onrender.com"]
           : "*",
         methods: ["GET", "POST"],
         credentials: true,
       },
+      // Enhanced transport configuration for Render.com
       transports: ["polling", "websocket"],
       allowEIO3: true,
       pingTimeout: 60000,
       pingInterval: 25000,
       upgradeTimeout: 30000,
       maxHttpBufferSize: 1e6,
+      // Force polling first, then upgrade to WebSocket
+      allowUpgrades: true,
+      perMessageDeflate: false,
+      httpCompression: false,
+      // Additional WebSocket configuration
+      serveClient: false,
+      cookie: false,
     })
+
+    // Enhanced connection handling
+    io.engine.on("connection_error", (err) => {
+      console.log("❌ Socket.IO connection error:", err.req);
+      console.log("❌ Error code:", err.code);
+      console.log("❌ Error message:", err.message);
+      console.log("❌ Error context:", err.context);
+    });
 
     // Schedule periodic room cleanup (every 10 minutes)
     setInterval(async () => {
@@ -69,7 +85,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }, 10 * 60 * 1000)
 
     io.on("connection", (socket) => {
-      console.log("🔌 New Socket.IO connection:", socket.id)
+      console.log("🔌 New Socket.IO connection:", socket.id, "Transport:", socket.conn.transport.name)
+
+      // Log transport upgrades
+      socket.conn.on("upgrade", () => {
+        console.log("⬆️ Socket upgraded to:", socket.conn.transport.name);
+      });
 
       socket.on("create-room", async ({ roomId, playerId, data }, callback) => {
         try {

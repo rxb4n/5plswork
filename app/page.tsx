@@ -27,14 +27,21 @@ export default function HomePage() {
   const [showAudioSettings, setShowAudioSettings] = useState(false)
 
   useEffect(() => {
-    // Initialize socket connection
+    // Initialize socket connection with enhanced configuration
     const newSocket = io("/api/socketio", {
       path: "/api/socketio",
       addTrailingSlash: false,
+      // Enhanced connection options for better reliability
+      forceNew: true,
+      reconnection: true,
+      timeout: 20000,
+      transports: ["polling", "websocket"],
+      upgrade: true,
+      rememberUpgrade: false,
     })
 
     newSocket.on("connect", () => {
-      console.log("Connected to server")
+      console.log("✅ Connected to server, transport:", newSocket.io.engine.transport.name)
       // Request available rooms when connected
       newSocket.emit("get-available-rooms", {}, (response: { rooms: AvailableRoom[] }) => {
         if (response.rooms) {
@@ -43,14 +50,23 @@ export default function HomePage() {
       })
     })
 
+    newSocket.on("connect_error", (error) => {
+      console.error("❌ Connection error:", error)
+    })
+
     newSocket.on("available-rooms-update", ({ rooms }: { rooms: AvailableRoom[] }) => {
-      console.log("Available rooms updated:", rooms)
+      console.log("📡 Available rooms updated:", rooms)
       setAvailableRooms(rooms)
     })
 
-    newSocket.on("disconnect", () => {
-      console.log("Disconnected from server")
+    newSocket.on("disconnect", (reason) => {
+      console.log("🔌 Disconnected from server, reason:", reason)
     })
+
+    // Log transport upgrades
+    newSocket.io.on("upgrade", () => {
+      console.log("⬆️ Upgraded to transport:", newSocket.io.engine.transport.name);
+    });
 
     setSocket(newSocket)
 
@@ -252,15 +268,6 @@ export default function HomePage() {
                     <li>• Translate English words correctly</li>
                     <li>• Earn points for correct answers</li>
                     <li>• First to reach target score wins!</li>
-                  </ul>
-                </div>
-                
-                <div className="space-y-2">
-                  <p className="font-medium">🔊 Sound Effects:</p>
-                  <ul className="space-y-1 text-gray-600 ml-4">
-                    <li>• Click sounds for button presses</li>
-                    <li>• Success chimes for correct answers</li>
-                    <li>• Buzzer sounds for wrong answers</li>
                   </ul>
                 </div>
 

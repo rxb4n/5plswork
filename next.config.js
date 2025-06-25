@@ -11,7 +11,36 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  // Important for Render.com WebSocket support
+  // Enhanced WebSocket support for Render.com
+  async headers() {
+    return [
+      {
+        source: '/api/socketio',
+        headers: [
+          {
+            key: 'Access-Control-Allow-Origin',
+            value: '*',
+          },
+          {
+            key: 'Access-Control-Allow-Methods',
+            value: 'GET, POST, PUT, DELETE, OPTIONS',
+          },
+          {
+            key: 'Access-Control-Allow-Headers',
+            value: 'Content-Type, Authorization',
+          },
+          {
+            key: 'Connection',
+            value: 'Upgrade',
+          },
+          {
+            key: 'Upgrade',
+            value: 'websocket',
+          },
+        ],
+      },
+    ]
+  },
   async rewrites() {
     return [
       {
