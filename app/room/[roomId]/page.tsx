@@ -131,6 +131,7 @@ export default function RoomPage() {
     if (!roomId || !playerId || !playerName) return
 
     console.log("🔌 Initializing Socket.IO connection for room...")
+    console.log("📋 Room parameters:", { roomId, playerId, playerName, isHost })
     
     const newSocket = io({
       path: "/api/socketio",
@@ -148,10 +149,11 @@ export default function RoomPage() {
 
     newSocket.on("connect", () => {
       console.log("✅ Connected to server successfully")
+      console.log("  - Socket ID:", newSocket.id)
       setConnectionStatus('connected')
       setError(null)
       
-      // Join or create room
+      // Join or create room with proper error handling
       if (isHost) {
         console.log(`🏠 Creating room ${roomId} as host`)
         newSocket.emit("create-room", { 
@@ -159,14 +161,31 @@ export default function RoomPage() {
           playerId, 
           data: { targetScore: 100 } 
         }, (response: any) => {
+          console.log("📡 Create room response:", response)
           if (response.error) {
             console.error("❌ Failed to create room:", response.error)
             setError(response.error)
             setIsLoading(false)
           } else {
-            console.log("✅ Room created successfully")
+            console.log("✅ Room created successfully:", response.room)
             setRoom(response.room)
-            setIsLoading(false)
+            
+            // Now add the host player to the room
+            newSocket.emit("join-room", { 
+              roomId, 
+              playerId, 
+              data: { name: decodeURIComponent(playerName), isHost: true } 
+            }, (joinResponse: any) => {
+              console.log("📡 Join room response:", joinResponse)
+              if (joinResponse.error) {
+                console.error("❌ Failed to join created room:", joinResponse.error)
+                setError(joinResponse.error)
+              } else {
+                console.log("✅ Host joined room successfully:", joinResponse.room)
+                setRoom(joinResponse.room)
+              }
+              setIsLoading(false)
+            })
           }
         })
       } else {
@@ -176,12 +195,13 @@ export default function RoomPage() {
           playerId, 
           data: { name: decodeURIComponent(playerName), isHost: false } 
         }, (response: any) => {
+          console.log("📡 Join room response:", response)
           if (response.error) {
             console.error("❌ Failed to join room:", response.error)
             setError(response.error)
             setIsLoading(false)
           } else {
-            console.log("✅ Joined room successfully")
+            console.log("✅ Joined room successfully:", response.room)
             setRoom(response.room)
             setIsLoading(false)
           }
@@ -246,6 +266,12 @@ export default function RoomPage() {
     newSocket.on("disconnect", (reason) => {
       console.log("🔌 Disconnected from server, reason:", reason)
       setConnectionStatus('connecting')
+    })
+
+    newSocket.on("reconnect", (attemptNumber) => {
+      console.log("🔄 Reconnected after", attemptNumber, "attempts")
+      setConnectionStatus('connected')
+      setError(null)
     })
 
     setSocket(newSocket)
@@ -459,6 +485,11 @@ export default function RoomPage() {
             <p className="text-gray-600 text-center">
               {connectionStatus === 'connecting' ? 'Connecting to server...' : 'Setting up room...'}
             </p>
+            <div className="mt-4 text-sm text-gray-500">
+              <p>Room ID: {roomId}</p>
+              <p>Player: {decodeURIComponent(playerName || '')}</p>
+              <p>Role: {isHost ? 'Host' : 'Player'}</p>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -491,6 +522,10 @@ export default function RoomPage() {
             <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
             <h2 className="text-xl font-semibold mb-2">Loading Room...</h2>
             <p className="text-gray-600 text-center">Please wait while we load the room data.</p>
+            <div className="mt-4 text-sm text-gray-500">
+              <p>Connection: {connectionStatus}</p>
+              <p>Room ID: {roomId}</p>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -541,6 +576,67 @@ export default function RoomPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Debug Information */}
+        {process.env.NODE_ENV === 'development' && (
+          <Card className="mb-6 border-blue-200 bg-blue-50">
+            <CardContent className="p-4">
+              <h3 className="font-semibold text-blue-700 mb-2">Debug Info</h3>
+              <div className="text-sm text-blue-600 space-y-1">
+                <p>Room State: {room.game_state}</p>
+                <p>Players: {room.players.length}</p>
+                <p>Current Player: {currentPlayer?.name || 'Not found'}</p>
+                <p>Is Host: {isCurrentPlayerHost ? 'Yes' : 'No'}</p>
+                <p>Game Mode: {room.game_mode || 'Not set'}</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Game Rules Section */}
+        <Card className="mb-6 mobile-card">
+          <CardHeader className="mobile-padding">
+            <CardTitle className="mobile-text-lg">Game Rules</CardTitle>
+          </CardHeader>
+          <CardContent className="mobile-spacing-sm mobile-text-sm mobile-padding">
+            <div className="mobile-spacing-sm">
+              <p className="font-medium mobile-text-base">🎯 Game Modes:</p>
+              <div className="mobile-spacing-sm ml-4">
+                <div className="flex items-start gap-2">
+                  <BookOpen className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-medium text-blue-600 mobile-text-sm">Practice Mode</p>
+                    <p className="text-gray-600 mobile-text-sm">Individual language selection, no penalties for wrong answers</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Zap className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-medium text-orange-600 mobile-text-sm">Competition Mode</p>
+                    <p className="text-gray-600 mobile-text-sm">Same language for all players, point penalties for wrong answers</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <HandHeart className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-medium text-purple-600 mobile-text-sm">Cooperation Mode</p>
+                    <p className="text-gray-600 mobile-text-sm">2 players work together, type words by category, share 3 lives</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mobile-spacing-sm">
+              <p className="font-medium mobile-text-base">🎮 How to Play:</p>
+              <ul className="mobile-spacing-sm text-gray-600 ml-4">
+                <li className="mobile-text-sm">• Choose your game mode and language</li>
+                <li className="mobile-text-sm">• Translate English words correctly</li>
+                <li className="mobile-text-sm">• Earn points for correct answers</li>
+                <li className="mobile-text-sm">• First to reach target score wins!</li>
+              </ul>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Game Content */}
         {room.game_state === "lobby" && (

@@ -232,17 +232,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const targetScore = [100, 250, 500].includes(Number(data?.targetScore)) ? Number(data.targetScore) : 100
           const room = await createRoom(roomId, { target_score: targetScore })
           if (!room) {
+            console.error(`❌ Failed to create room ${roomId} in database`)
             return callback({ error: "Failed to create room", status: 500 })
           }
-          socket.join(roomId)
           
+          // Join the socket to the room
+          socket.join(roomId)
           updateRoomActivityTracker(roomId, playerId)
           
+          console.log(`✅ Room ${roomId} created successfully`)
           callback({ room })
-          io.to(roomId).emit("room-update", { room })
           broadcastAvailableRooms(io)
           
-          console.log(`✅ Room ${roomId} created successfully`)
         } catch (error) {
           console.error(`❌ Error creating room ${roomId}:`, error)
           callback({ error: "Failed to create room", status: 500 })
@@ -251,9 +252,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       socket.on("join-room", async ({ roomId, playerId, data }, callback) => {
         try {
-          console.log(`👤 Player ${playerId} joining room ${roomId}`)
+          console.log(`👤 Player ${playerId} (${data.name}) joining room ${roomId}`)
           const room = await getRoom(roomId)
           if (!room) {
+            console.error(`❌ Room ${roomId} not found`)
             return callback({ error: "Room not found", status: 404 })
           }
           
@@ -281,20 +283,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             is_host: data.isHost || false,
             current_question: null,
           }
+          
           const success = await addPlayerToRoom(roomId, player)
           if (!success) {
+            console.error(`❌ Failed to add player ${playerId} to room ${roomId}`)
             return callback({ error: "Failed to join room", status: 500 })
           }
-          socket.join(roomId)
           
+          // Join the socket to the room
+          socket.join(roomId)
           updateRoomActivityTracker(roomId, playerId)
           
           const updatedRoom = await getRoom(roomId)
+          console.log(`✅ Player ${playerId} joined room ${roomId}. Room now has ${updatedRoom?.players.length} players`)
+          
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
           broadcastAvailableRooms(io)
           
-          console.log(`✅ Player ${playerId} joined room ${roomId}`)
         } catch (error) {
           console.error(`❌ Error joining room ${roomId}:`, error)
           callback({ error: "Failed to join room", status: 500 })
