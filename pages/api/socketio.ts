@@ -40,34 +40,50 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       addTrailingSlash: false,
       cors: {
         origin: process.env.NODE_ENV === "production" 
-          ? ["https://oneplswork.onrender.com", "https://*.onrender.com", "wss://oneplswork.onrender.com"]
+          ? [
+              "https://oneplswork.onrender.com", 
+              "https://*.onrender.com",
+              "wss://oneplswork.onrender.com",
+              "ws://oneplswork.onrender.com"
+            ]
           : "*",
         methods: ["GET", "POST"],
         credentials: true,
       },
-      // Enhanced transport configuration for Render.com
-      transports: ["polling", "websocket"],
+      // CRITICAL: Force polling first for Render.com compatibility
+      transports: ["polling"],
+      allowUpgrades: false, // Disable WebSocket upgrades initially
       allowEIO3: true,
       pingTimeout: 60000,
       pingInterval: 25000,
       upgradeTimeout: 30000,
       maxHttpBufferSize: 1e6,
-      // Force polling first, then upgrade to WebSocket
-      allowUpgrades: true,
-      perMessageDeflate: false,
-      httpCompression: false,
-      // Additional WebSocket configuration
+      // Additional configuration for cloud platforms
       serveClient: false,
       cookie: false,
+      perMessageDeflate: false,
+      httpCompression: false,
     })
 
-    // Enhanced connection handling
+    // Enhanced connection error handling
     io.engine.on("connection_error", (err) => {
-      console.log("❌ Socket.IO connection error:", err.req);
-      console.log("❌ Error code:", err.code);
-      console.log("❌ Error message:", err.message);
-      console.log("❌ Error context:", err.context);
-    });
+      console.log("❌ Socket.IO connection error details:")
+      console.log("  - Request URL:", err.req?.url)
+      console.log("  - Request method:", err.req?.method)
+      console.log("  - Request headers:", err.req?.headers)
+      console.log("  - Error code:", err.code)
+      console.log("  - Error message:", err.message)
+      console.log("  - Error context:", err.context)
+    })
+
+    // Log all engine events for debugging
+    io.engine.on("initial_headers", (headers, req) => {
+      console.log("📋 Initial headers:", headers)
+    })
+
+    io.engine.on("headers", (headers, req) => {
+      console.log("📋 Response headers:", headers)
+    })
 
     // Schedule periodic room cleanup (every 10 minutes)
     setInterval(async () => {
@@ -87,9 +103,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     io.on("connection", (socket) => {
       console.log("🔌 New Socket.IO connection:", socket.id, "Transport:", socket.conn.transport.name)
 
-      // Log transport upgrades
+      // Enhanced connection logging
       socket.conn.on("upgrade", () => {
         console.log("⬆️ Socket upgraded to:", socket.conn.transport.name);
+      });
+
+      socket.conn.on("upgradeError", (err) => {
+        console.log("❌ Socket upgrade error:", err);
+      });
+
+      socket.on("connect_error", (error) => {
+        console.error("❌ Client connection error:", error);
       });
 
       socket.on("create-room", async ({ roomId, playerId, data }, callback) => {
@@ -470,13 +494,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      socket.on("disconnect", async () => {
-        console.log("🔌 Socket.IO client disconnected:", socket.id)
+      socket.on("disconnect", async (reason) => {
+        console.log("🔌 Socket.IO client disconnected:", socket.id, "Reason:", reason)
       })
     })
 
     res.socket.server.io = io
-    console.log("✅ Socket.IO server initialized successfully")
+    console.log("✅ Socket.IO server initialized successfully with polling-only transport")
   }
 
   res.status(200).end()

@@ -82,6 +82,7 @@ export default function RoomPage() {
   const [timeLeft, setTimeLeft] = useState(10)
   const [isAnswering, setIsAnswering] = useState(false)
   const [showAudioSettings, setShowAudioSettings] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
 
   // Initialize socket and join room
   useEffect(() => {
@@ -91,13 +92,24 @@ export default function RoomPage() {
       return
     }
 
+    console.log("🔌 Initializing room Socket.IO connection...")
+
     const newSocket = io("/api/socketio", {
       path: "/api/socketio",
       addTrailingSlash: false,
+      // CRITICAL: Use polling only for Render.com compatibility
+      transports: ["polling"],
+      upgrade: false, // Disable WebSocket upgrades
+      forceNew: true,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      timeout: 20000,
     })
 
     newSocket.on("connect", () => {
-      console.log("Connected to server")
+      console.log("✅ Connected to server, transport:", newSocket.io.engine.transport.name)
+      setConnectionStatus('connected')
       
       if (isHost) {
         // Create room first, then join
@@ -136,6 +148,22 @@ export default function RoomPage() {
       })
     }
 
+    newSocket.on("connect_error", (error) => {
+      console.error("❌ Connection error:", error)
+      setConnectionStatus('error')
+      setError("Failed to connect to server. Please try refreshing the page.")
+    })
+
+    newSocket.on("disconnect", (reason) => {
+      console.log("🔌 Disconnected from server, reason:", reason)
+      setConnectionStatus('connecting')
+    })
+
+    newSocket.on("reconnect", (attemptNumber) => {
+      console.log("🔄 Reconnected after", attemptNumber, "attempts")
+      setConnectionStatus('connected')
+    })
+
     newSocket.on("room-update", ({ room: updatedRoom }: { room: Room }) => {
       console.log("Room updated:", updatedRoom)
       setRoom(updatedRoom)
@@ -156,10 +184,6 @@ export default function RoomPage() {
           router.push("/")
         }, 2000)
       }
-    })
-
-    newSocket.on("disconnect", () => {
-      console.log("Disconnected from server")
     })
 
     setSocket(newSocket)
@@ -337,6 +361,9 @@ export default function RoomPage() {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-lg text-gray-600">Connecting to room...</p>
+          {connectionStatus === 'error' && (
+            <p className="text-sm text-red-600 mt-2">Connection failed. Please refresh the page.</p>
+          )}
         </div>
       </div>
     )
@@ -351,10 +378,19 @@ export default function RoomPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-gray-600">{error}</p>
-            <SoundButton onClick={handleLeaveRoom} className="w-full">
-              <Home className="h-4 w-4 mr-2" />
-              Return Home
-            </SoundButton>
+            <div className="space-y-2">
+              <SoundButton onClick={handleLeaveRoom} className="w-full">
+                <Home className="h-4 w-4 mr-2" />
+                Return Home
+              </SoundButton>
+              <SoundButton 
+                onClick={() => window.location.reload()} 
+                variant="outline" 
+                className="w-full"
+              >
+                🔄 Refresh Page
+              </SoundButton>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -389,11 +425,23 @@ export default function RoomPage() {
             <h1 className="text-2xl font-bold text-gray-900">
               Room: <span className="font-mono text-blue-600">{roomId}</span>
             </h1>
-            <p className="text-gray-600">
-              {room.game_state === "lobby" && "Waiting for players..."}
-              {room.game_state === "playing" && "Game in progress"}
-              {room.game_state === "finished" && "Game finished!"}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-gray-600">
+                {room.game_state === "lobby" && "Waiting for players..."}
+                {room.game_state === "playing" && "Game in progress"}
+                {room.game_state === "finished" && "Game finished!"}
+              </p>
+              {connectionStatus === 'connecting' && (
+                <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
+                  🔄 Reconnecting...
+                </Badge>
+              )}
+              {connectionStatus === 'error' && (
+                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                  ❌ Connection lost
+                </Badge>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <SoundButton
@@ -469,7 +517,7 @@ export default function RoomPage() {
                   <div className="flex items-center gap-4">
                     <SoundButton
                       onClick={handleToggleReady}
-                      disabled={!currentPlayer.language}
+                      disabled={!currentPlayer.language || connectionStatus !== 'connected'}
                       variant={currentPlayer.ready ? "default" : "outline"}
                       className="flex-1"
                     >
@@ -480,7 +528,7 @@ export default function RoomPage() {
                     {currentPlayer.is_host && (
                       <SoundButton
                         onClick={handleStartGame}
-                        disabled={!room.players.every(p => p.language && p.ready)}
+                        disabled={!room.players.every(p => p.language && p.ready) || connectionStatus !== 'connected'}
                         size="lg"
                         className="flex-1"
                       >
@@ -539,7 +587,7 @@ export default function RoomPage() {
                       <SoundButton
                         key={index}
                         onClick={() => handleAnswer(option)}
-                        disabled={isAnswering || timeLeft === 0}
+                        disabled={isAnswering || timeLeft === 0 || connectionStatus !== 'connected'}
                         variant="outline"
                         className="h-16 text-lg"
                         playSound={false} // We handle sounds manually for answers
@@ -581,7 +629,12 @@ export default function RoomPage() {
                   )}
 
                   {currentPlayer.is_host && (
-                    <SoundButton onClick={handleRestart} className="w-full" size="lg">
+                    <SoundButton 
+                      onClick={handleRestart} 
+                      className="w-full" 
+                      size="lg"
+                      disabled={connectionStatus !== 'connected'}
+                    >
                       <RotateCcw className="h-4 w-4 mr-2" />
                       Start New Game
                     </SoundButton>
@@ -665,6 +718,21 @@ export default function RoomPage() {
                     <span className="font-bold text-blue-600">{currentPlayer.score}</span>
                   </div>
                 )}
+                <div className="flex justify-between">
+                  <span>Connection:</span>
+                  <Badge 
+                    variant="outline" 
+                    className={`text-xs ${
+                      connectionStatus === 'connected' ? 'bg-green-50 text-green-700 border-green-200' :
+                      connectionStatus === 'connecting' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
+                      'bg-red-50 text-red-700 border-red-200'
+                    }`}
+                  >
+                    {connectionStatus === 'connected' ? '✅ Connected' :
+                     connectionStatus === 'connecting' ? '🔄 Connecting' :
+                     '❌ Disconnected'}
+                  </Badge>
+                </div>
               </CardContent>
             </Card>
           </div>

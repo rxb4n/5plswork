@@ -11,7 +11,7 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  // Enhanced WebSocket support for Render.com
+  // Enhanced headers for WebSocket support on Render.com
   async headers() {
     return [
       {
@@ -27,15 +27,24 @@ const nextConfig = {
           },
           {
             key: 'Access-Control-Allow-Headers',
-            value: 'Content-Type, Authorization',
+            value: 'Content-Type, Authorization, X-Requested-With',
           },
           {
-            key: 'Connection',
-            value: 'Upgrade',
+            key: 'Access-Control-Allow-Credentials',
+            value: 'true',
+          },
+          // Prevent caching of Socket.IO endpoint
+          {
+            key: 'Cache-Control',
+            value: 'no-cache, no-store, must-revalidate',
           },
           {
-            key: 'Upgrade',
-            value: 'websocket',
+            key: 'Pragma',
+            value: 'no-cache',
+          },
+          {
+            key: 'Expires',
+            value: '0',
           },
         ],
       },

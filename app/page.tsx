@@ -25,23 +25,32 @@ export default function HomePage() {
   const [isConnecting, setIsConnecting] = useState(false)
   const [availableRooms, setAvailableRooms] = useState<AvailableRoom[]>([])
   const [showAudioSettings, setShowAudioSettings] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
 
   useEffect(() => {
-    // Initialize socket connection with enhanced configuration
+    // Initialize socket connection with enhanced configuration for Render.com
+    console.log("🔌 Initializing Socket.IO connection...")
+    
     const newSocket = io("/api/socketio", {
       path: "/api/socketio",
       addTrailingSlash: false,
-      // Enhanced connection options for better reliability
+      // CRITICAL: Use polling only for Render.com compatibility
+      transports: ["polling"],
+      upgrade: false, // Disable WebSocket upgrades
       forceNew: true,
       reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
       timeout: 20000,
-      transports: ["polling", "websocket"],
-      upgrade: true,
+      // Additional options for cloud platforms
+      autoConnect: true,
       rememberUpgrade: false,
     })
 
     newSocket.on("connect", () => {
       console.log("✅ Connected to server, transport:", newSocket.io.engine.transport.name)
+      setConnectionStatus('connected')
+      
       // Request available rooms when connected
       newSocket.emit("get-available-rooms", {}, (response: { rooms: AvailableRoom[] }) => {
         if (response.rooms) {
@@ -52,6 +61,21 @@ export default function HomePage() {
 
     newSocket.on("connect_error", (error) => {
       console.error("❌ Connection error:", error)
+      setConnectionStatus('error')
+    })
+
+    newSocket.on("disconnect", (reason) => {
+      console.log("🔌 Disconnected from server, reason:", reason)
+      setConnectionStatus('connecting')
+    })
+
+    newSocket.on("reconnect", (attemptNumber) => {
+      console.log("🔄 Reconnected after", attemptNumber, "attempts")
+      setConnectionStatus('connected')
+    })
+
+    newSocket.on("reconnect_error", (error) => {
+      console.error("❌ Reconnection error:", error)
     })
 
     newSocket.on("available-rooms-update", ({ rooms }: { rooms: AvailableRoom[] }) => {
@@ -59,18 +83,20 @@ export default function HomePage() {
       setAvailableRooms(rooms)
     })
 
-    newSocket.on("disconnect", (reason) => {
-      console.log("🔌 Disconnected from server, reason:", reason)
-    })
+    // Log transport events for debugging
+    newSocket.io.on("error", (error) => {
+      console.error("❌ Socket.IO error:", error);
+    });
 
-    // Log transport upgrades
-    newSocket.io.on("upgrade", () => {
-      console.log("⬆️ Upgraded to transport:", newSocket.io.engine.transport.name);
+    newSocket.io.on("reconnect_failed", () => {
+      console.error("❌ Failed to reconnect to server");
+      setConnectionStatus('error')
     });
 
     setSocket(newSocket)
 
     return () => {
+      console.log("🔌 Cleaning up socket connection...")
       newSocket.close()
     }
   }, [])
@@ -82,6 +108,11 @@ export default function HomePage() {
   const handleCreateRoom = () => {
     if (!playerName.trim()) {
       alert("Please enter your name")
+      return
+    }
+
+    if (connectionStatus !== 'connected') {
+      alert("Please wait for connection to establish")
       return
     }
 
@@ -104,6 +135,11 @@ export default function HomePage() {
       return
     }
 
+    if (connectionStatus !== 'connected') {
+      alert("Please wait for connection to establish")
+      return
+    }
+
     setIsConnecting(true)
     const playerId = `player-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
     
@@ -122,6 +158,25 @@ export default function HomePage() {
           <p className="text-lg text-gray-600">
             Test your language skills with friends in real-time multiplayer quizzes
           </p>
+          
+          {/* Connection Status */}
+          <div className="mt-4">
+            {connectionStatus === 'connecting' && (
+              <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
+                🔄 Connecting to server...
+              </Badge>
+            )}
+            {connectionStatus === 'connected' && (
+              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                ✅ Connected
+              </Badge>
+            )}
+            {connectionStatus === 'error' && (
+              <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                ❌ Connection failed - Please refresh
+              </Badge>
+            )}
+          </div>
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6">
@@ -155,7 +210,7 @@ export default function HomePage() {
                     onClick={handleCreateRoom}
                     className="w-full"
                     size="lg"
-                    disabled={!playerName.trim()}
+                    disabled={!playerName.trim() || connectionStatus !== 'connected'}
                   >
                     <Gamepad2 className="h-5 w-5 mr-2" />
                     Create New Room
@@ -173,7 +228,7 @@ export default function HomePage() {
                       onClick={() => handleJoinRoom()}
                       className="w-full"
                       variant="outline"
-                      disabled={!playerName.trim() || !roomCode.trim() || isConnecting}
+                      disabled={!playerName.trim() || !roomCode.trim() || isConnecting || connectionStatus !== 'connected'}
                     >
                       {isConnecting ? "Joining..." : "Join Room"}
                     </SoundButton>
@@ -195,7 +250,13 @@ export default function HomePage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {availableRooms.length === 0 ? (
+                {connectionStatus !== 'connected' ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                    <p className="text-lg font-medium mb-2">Connecting to server...</p>
+                    <p className="text-sm">Please wait while we establish connection</p>
+                  </div>
+                ) : availableRooms.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
                     <p className="text-lg font-medium mb-2">No active rooms</p>
@@ -223,7 +284,7 @@ export default function HomePage() {
                         </div>
                         <SoundButton
                           onClick={() => handleJoinRoom(room.id)}
-                          disabled={!playerName.trim() || isConnecting}
+                          disabled={!playerName.trim() || isConnecting || connectionStatus !== 'connected'}
                           size="sm"
                         >
                           {isConnecting ? "Joining..." : "Join"}
@@ -281,6 +342,19 @@ export default function HomePage() {
                     ))}
                   </div>
                 </div>
+
+                {/* Connection Troubleshooting */}
+                {connectionStatus === 'error' && (
+                  <div className="space-y-2 mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
+                    <p className="font-medium text-red-700">🔧 Connection Issues?</p>
+                    <ul className="space-y-1 text-red-600 text-xs ml-4">
+                      <li>• Try refreshing the page</li>
+                      <li>• Check your internet connection</li>
+                      <li>• Disable ad blockers if any</li>
+                      <li>• Try a different browser</li>
+                    </ul>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
