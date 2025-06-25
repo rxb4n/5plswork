@@ -342,13 +342,32 @@ export default function RoomPage() {
     }
   }, [])
 
-  // Auto-fetch question when game state changes to playing
+  // 🔧 FIX #1: Auto-fetch question when game state changes to playing
+  // Fixed to handle both practice and competition modes correctly
   useEffect(() => {
-    if (room?.game_state === "playing" && currentPlayer?.language && !currentQuestion) {
-      console.log("Game started, fetching initial question...")
-      fetchNewQuestion(currentPlayer.language)
+    if (room?.game_state === "playing" && !currentQuestion) {
+      console.log("🎮 Game started, determining question language...")
+      
+      let questionLanguage: string | null = null
+      
+      if (room.game_mode === "practice") {
+        // Practice mode: use player's individual language
+        questionLanguage = currentPlayer?.language || null
+        console.log("📚 Practice mode: using player language", questionLanguage)
+      } else if (room.game_mode === "competition") {
+        // Competition mode: use host's selected language
+        questionLanguage = room.host_language || null
+        console.log("🏆 Competition mode: using host language", questionLanguage)
+      }
+      
+      if (questionLanguage) {
+        console.log("✅ Fetching initial question for language:", questionLanguage)
+        fetchNewQuestion(questionLanguage)
+      } else {
+        console.error("❌ No language available for question fetching")
+      }
     }
-  }, [room?.game_state, currentPlayer?.language, currentQuestion, fetchNewQuestion])
+  }, [room?.game_state, room?.game_mode, room?.host_language, currentPlayer?.language, currentQuestion, fetchNewQuestion])
 
   // Timer countdown
   useEffect(() => {
@@ -489,8 +508,17 @@ export default function RoomPage() {
           setIsAnswering(false)
           setSelectedAnswer(null)
           
-          if (currentPlayer?.language && room?.game_state === "playing") {
-            fetchNewQuestion(currentPlayer.language)
+          // 🔧 FIX: Determine correct language for next question
+          let nextQuestionLanguage: string | null = null
+          
+          if (room?.game_mode === "practice") {
+            nextQuestionLanguage = currentPlayer?.language || null
+          } else if (room?.game_mode === "competition") {
+            nextQuestionLanguage = room?.host_language || null
+          }
+          
+          if (nextQuestionLanguage && room?.game_state === "playing") {
+            fetchNewQuestion(nextQuestionLanguage)
           }
         }, 2000)
       }
@@ -922,10 +950,11 @@ export default function RoomPage() {
                     ))}
                   </div>
 
+                  {/* 🔧 FIX #2: Fixed typo in variable name */}
                   {/* Feedback Display */}
                   {showFeedback && (
                     <div className="text-center">
-                      {isCorreectAnswer ? (
+                      {isCorrectAnswer ? (
                         <div className="flex items-center justify-center gap-2 text-green-600">
                           <CheckCircle className="h-6 w-6" />
                           <span className="mobile-text-xl font-bold">Correct! 🎉</span>
