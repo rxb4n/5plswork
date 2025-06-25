@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { AudioSettings } from "@/components/audio-settings"
-import { Gamepad2, Users, Settings, Volume2, BookOpen, Zap } from "lucide-react"
+import { Gamepad2, Users, Settings, Volume2, BookOpen, Zap, Globe } from "lucide-react"
 import { io, Socket } from "socket.io-client"
 
 interface AvailableRoom {
@@ -17,7 +17,16 @@ interface AvailableRoom {
   status: "waiting"
   targetScore: number
   gameMode?: "practice" | "competition" | null
+  hostLanguage?: "french" | "german" | "russian" | "japanese" | "spanish" | null
 }
+
+const LANGUAGES = [
+  { value: "french", label: "🇫🇷 French" },
+  { value: "german", label: "🇩🇪 German" },
+  { value: "russian", label: "🇷🇺 Russian" },
+  { value: "japanese", label: "🇯🇵 Japanese" },
+  { value: "spanish", label: "🇪🇸 Spanish" },
+] as const
 
 export default function HomePage() {
   const [socket, setSocket] = useState<Socket | null>(null)
@@ -177,6 +186,61 @@ export default function HomePage() {
     window.location.href = `/room/${codeToJoin}?playerId=${playerId}&name=${encodeURIComponent(playerName.trim())}&isHost=false`
   }
 
+  const getGameModeDisplay = (room: AvailableRoom) => {
+    if (!room.gameMode) {
+      return (
+        <Badge variant="outline" className="text-xs bg-gray-50 text-gray-600">
+          <Settings className="h-3 w-3 mr-1" />
+          Setting up...
+        </Badge>
+      )
+    }
+
+    if (room.gameMode === "practice") {
+      return (
+        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+          <BookOpen className="h-3 w-3 mr-1" />
+          Practice
+        </Badge>
+      )
+    }
+
+    return (
+      <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200">
+        <Zap className="h-3 w-3 mr-1" />
+        Competition
+      </Badge>
+    )
+  }
+
+  const getLanguageDisplay = (room: AvailableRoom) => {
+    if (room.gameMode === "competition" && room.hostLanguage) {
+      const language = LANGUAGES.find(l => l.value === room.hostLanguage)
+      return (
+        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+          <Globe className="h-3 w-3 mr-1" />
+          {language?.label || room.hostLanguage}
+        </Badge>
+      )
+    }
+    return null
+  }
+
+  const getRoomStatusDisplay = (room: AvailableRoom) => {
+    if (room.gameMode) {
+      return (
+        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+          ✅ Ready to Join
+        </Badge>
+      )
+    }
+    return (
+      <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-200">
+        ⚙️ Setting Up
+      </Badge>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
       <div className="max-w-6xl mx-auto">
@@ -190,7 +254,7 @@ export default function HomePage() {
             Test your language skills with friends in real-time multiplayer quizzes
           </p>
           
-          {/* Enhanced Connection Status */}
+          {/* Connection Status */}
           <div className="mt-4">
             {connectionStatus === 'connecting' && (
               <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
@@ -275,7 +339,7 @@ export default function HomePage() {
               </CardContent>
             </Card>
 
-            {/* Available Rooms */}
+            {/* Enhanced Available Rooms */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -308,47 +372,73 @@ export default function HomePage() {
                     <p className="text-sm">Be the first to create a room!</p>
                   </div>
                 ) : (
-                  <div className="grid gap-3">
+                  <div className="grid gap-4">
                     {availableRooms.map((room) => (
                       <div
                         key={room.id}
                         className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors"
                       >
-                        <div className="flex items-center gap-4">
-                          <div>
-                            <p className="font-mono text-lg font-bold text-blue-600">
+                        <div className="flex items-start gap-4 flex-1">
+                          {/* Room Code and Basic Info */}
+                          <div className="min-w-0">
+                            <p className="font-mono text-lg font-bold text-blue-600 mb-1">
                               {room.id}
                             </p>
-                            <div className="flex items-center gap-2 text-sm text-gray-500">
+                            <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
                               <span>Target: {room.targetScore} points</span>
-                              {room.gameMode && (
-                                <Badge variant="outline" className="text-xs">
-                                  {room.gameMode === "practice" ? (
-                                    <>
-                                      <BookOpen className="h-3 w-3 mr-1" />
-                                      Practice
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Zap className="h-3 w-3 mr-1" />
-                                      Competition
-                                    </>
-                                  )}
-                                </Badge>
-                              )}
+                              <span>•</span>
+                              <Badge variant="outline" className="text-xs">
+                                {room.playerCount}/{room.maxPlayers} players
+                              </Badge>
                             </div>
                           </div>
-                          <Badge variant="outline">
-                            {room.playerCount}/{room.maxPlayers} players
-                          </Badge>
+
+                          {/* Game Mode and Language Info */}
+                          <div className="flex flex-col gap-2 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-medium text-gray-700">Mode:</span>
+                              {getGameModeDisplay(room)}
+                            </div>
+                            
+                            {room.gameMode === "competition" && (
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-medium text-gray-700">Language:</span>
+                                {getLanguageDisplay(room) || (
+                                  <Badge variant="outline" className="text-xs bg-gray-50 text-gray-600">
+                                    <Settings className="h-3 w-3 mr-1" />
+                                    Not selected
+                                  </Badge>
+                                )}
+                              </div>
+                            )}
+
+                            {room.gameMode === "practice" && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-gray-700">Languages:</span>
+                                <Badge variant="outline" className="text-xs bg-blue-50 text-blue-600">
+                                  Individual choice
+                                </Badge>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Status */}
+                          <div className="flex flex-col items-end gap-2">
+                            {getRoomStatusDisplay(room)}
+                          </div>
                         </div>
-                        <SoundButton
-                          onClick={() => handleJoinRoom(room.id)}
-                          disabled={!playerName.trim() || isConnecting || connectionStatus !== 'connected'}
-                          size="sm"
-                        >
-                          {isConnecting ? "Joining..." : "Join"}
-                        </SoundButton>
+
+                        {/* Join Button */}
+                        <div className="ml-4">
+                          <SoundButton
+                            onClick={() => handleJoinRoom(room.id)}
+                            disabled={!playerName.trim() || isConnecting || connectionStatus !== 'connected'}
+                            size="sm"
+                            className="min-w-[80px]"
+                          >
+                            {isConnecting ? "Joining..." : "Join"}
+                          </SoundButton>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -423,7 +513,6 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {/* Enhanced Connection Troubleshooting */}
                 {connectionStatus === 'error' && (
                   <div className="space-y-2 mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
                     <p className="font-medium text-red-700">🔧 Connection Issues?</p>
