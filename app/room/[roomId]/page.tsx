@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useParams, useSearchParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { SoundButton } from "@/components/ui/sound-button"
@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Progress } from "@/components/ui/progress"
+import { useAudio } from "@/lib/audio"
 import { 
   Users, 
   Settings, 
@@ -89,6 +90,7 @@ export default function RoomPage() {
   const params = useParams()
   const searchParams = useSearchParams()
   const router = useRouter()
+  const audio = useAudio()
   
   // Extract parameters from URL
   const roomId = params.roomId as string
@@ -112,7 +114,7 @@ export default function RoomPage() {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Game state
+  // Game state with debouncing
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
   const [selectedAnswer, setSelectedAnswer] = useState<string>("")
   const [timeLeft, setTimeLeft] = useState(10)
@@ -127,33 +129,63 @@ export default function RoomPage() {
   const [cooperationTyping, setCooperationTyping] = useState<{ playerId: string; text: string } | null>(null)
   const [isCooperationWaiting, setIsCooperationWaiting] = useState(false)
 
+  // Refs for cleanup and debouncing
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const activityPingRef = useRef<NodeJS.Timeout | null>(null)
+  const questionLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const lastQuestionLoadRef = useRef<number>(0)
 
-  // Load question function
-  const loadQuestion = async (language: string): Promise<Question | null> => {
-    console.log(`🔍 [GAME] Loading question for ${language}`)
+  // Debounced question loading function
+  const loadQuestion = useCallback(async (language: string, forceReload = false) => {
+    const now = Date.now()
+    
+    // Prevent duplicate calls within 1 second unless forced
+    if (!forceReload && now - lastQuestionLoadRef.current < 1000) {
+      console.log('🚫 [QUESTION] Skipping duplicate question load request')
+      return
+    }
+    
+    lastQuestionLoadRef.current = now
+    
+    if (isLoadingQuestion) {
+      console.log('🚫 [QUESTION] Already loading question, skipping')
+      return
+    }
+
+    console.log(`🔍 [QUESTION] Loading question for ${language}`)
     setIsLoadingQuestion(true)
     setQuestionLoadingError(null)
     
+    // Clear any existing timeout
+    if (questionLoadTimeoutRef.current) {
+      clearTimeout(questionLoadTimeoutRef.current)
+    }
+
     try {
+      // Add timeout for the request
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+      
       const response = await fetch('/api/get-question', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language })
+        body: JSON.stringify({ language }),
+        signal: controller.signal
       })
 
-      console.log(`📡 [GAME] Question API response status: ${response.status}`)
+      clearTimeout(timeoutId)
+
+      console.log(`📡 [QUESTION] API response status: ${response.status}`)
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
       const data = await response.json()
-      console.log(`✅ [GAME] Question loaded successfully:`, data)
+      console.log(`✅ [QUESTION] Question loaded successfully:`, data)
       
       if (data.success && data.question) {
-        console.log(`📝 [GAME] Question details:`)
+        console.log(`📝 [QUESTION] Question details:`)
         console.log(`  - ID: ${data.question.questionId}`)
         console.log(`  - English: ${data.question.english}`)
         console.log(`  - Correct Answer: ${data.question.correctAnswer}`)
@@ -173,7 +205,7 @@ export default function RoomPage() {
           setTimeLeft(prev => {
             if (prev <= 1) {
               // Time's up - auto submit
-              handleAnswerSubmit("", data.question.correctAnswer, language === currentPlayer?.language)
+              handleAnswerSubmit("", data.question.correctAnswer, true)
               return 0
             }
             return prev - 1
@@ -185,18 +217,32 @@ export default function RoomPage() {
         throw new Error('Invalid question data received')
       }
     } catch (error) {
-      console.error(`❌ [GAME] Question loading failed:`, error)
-      setQuestionLoadingError(`Failed to load question: ${error.message}`)
+      console.error(`❌ [QUESTION] Question loading failed:`, error)
+      
+      let errorMessage = 'Failed to load question'
+      if (error.name === 'AbortError') {
+        errorMessage = 'Question loading timed out'
+      } else if (error.message.includes('ECONNREFUSED')) {
+        errorMessage = 'Cannot connect to question service'
+      } else {
+        errorMessage = `Failed to load question: ${error.message}`
+      }
+      
+      setQuestionLoadingError(errorMessage)
       return null
     } finally {
       setIsLoadingQuestion(false)
     }
-  }
+  }, [isLoadingQuestion])
 
-  // Handle answer submission
-  const handleAnswerSubmit = async (answer: string, correctAnswer: string, isPracticeMode: boolean) => {
-    if (isAnswering) return
-    
+  // Enhanced answer submission with proper audio feedback
+  const handleAnswerSubmit = useCallback(async (answer: string, correctAnswer: string, isTimeout = false) => {
+    if (isAnswering) {
+      console.log('🚫 [ANSWER] Already processing answer, skipping')
+      return
+    }
+
+    console.log(`📝 [ANSWER] Submitting answer: "${answer}", correct: "${correctAnswer}", timeout: ${isTimeout}`)
     setIsAnswering(true)
     
     // Clear timer
@@ -205,41 +251,58 @@ export default function RoomPage() {
       timerRef.current = null
     }
 
-    console.log(`📝 [GAME] Submitting answer: "${answer}" (correct: "${correctAnswer}")`)
+    const isCorrect = answer === correctAnswer && !isTimeout
+    const responseTime = Date.now() - questionStartTime
+    
+    console.log(`🎯 [ANSWER] Answer is ${isCorrect ? 'correct' : 'incorrect'}, response time: ${responseTime}ms`)
 
+    // Play appropriate sound effect
     try {
-      if (socket) {
-        socket.emit("answer", {
-          roomId,
-          playerId,
-          data: {
-            answer,
-            timeLeft,
-            correctAnswer,
-            isPracticeMode
-          }
-        }, (response: any) => {
-          if (response.error) {
-            console.error("❌ Failed to submit answer:", response.error)
-            setError(response.error)
-          } else {
-            console.log("✅ Answer submitted successfully")
-            // Load next question after a short delay
-            setTimeout(() => {
-              const currentPlayer = room?.players.find(p => p.id === playerId)
-              if (currentPlayer?.language && room?.game_state === "playing") {
-                loadQuestion(currentPlayer.language)
-              }
-            }, 2000)
-          }
-          setIsAnswering(false)
-        })
+      if (isCorrect) {
+        console.log('🔊 [ANSWER] Playing success sound')
+        await audio.playSuccess()
+      } else {
+        console.log('🔊 [ANSWER] Playing failure sound')
+        await audio.playFailure()
       }
     } catch (error) {
-      console.error("❌ Error submitting answer:", error)
+      console.warn('⚠️ [ANSWER] Failed to play sound:', error)
+    }
+
+    // Submit answer to server
+    if (socket && room) {
+      const answerData = {
+        answer,
+        timeLeft: isTimeout ? 0 : timeLeft,
+        correctAnswer,
+        isPracticeMode: room.game_mode === "practice"
+      }
+
+      socket.emit("answer", { roomId, playerId, data: answerData }, (response: any) => {
+        if (response.error) {
+          console.error("❌ [ANSWER] Failed to submit answer:", response.error)
+          setError(response.error)
+        } else {
+          console.log("✅ [ANSWER] Answer submitted successfully")
+          setRoom(response.room)
+          
+          // Load next question after a delay
+          setTimeout(() => {
+            const currentPlayer = response.room?.players.find((p: Player) => p.id === playerId)
+            if (currentPlayer?.language && response.room?.game_state === "playing") {
+              const language = room.game_mode === "competition" ? room.host_language : currentPlayer.language
+              if (language) {
+                loadQuestion(language, true) // Force reload for next question
+              }
+            }
+          }, 2000)
+        }
+        setIsAnswering(false)
+      })
+    } else {
       setIsAnswering(false)
     }
-  }
+  }, [isAnswering, socket, room, roomId, playerId, timeLeft, questionStartTime, audio, loadQuestion])
 
   // Initialize socket connection
   useEffect(() => {
@@ -333,26 +396,30 @@ export default function RoomPage() {
 
     newSocket.on("room-update", ({ room: updatedRoom }: { room: Room }) => {
       console.log("📡 Room updated:", updatedRoom)
-      setRoom(updatedRoom)
-      
-      // If game just started, load first question
-      if (updatedRoom.game_state === "playing" && !currentQuestion) {
-        const currentPlayer = updatedRoom.players.find(p => p.id === playerId)
-        if (currentPlayer?.language && (updatedRoom.game_mode === "practice" || updatedRoom.game_mode === "competition")) {
-          const language = updatedRoom.game_mode === "practice" 
-            ? currentPlayer.language 
-            : updatedRoom.host_language
-          
-          if (language) {
-            console.log(`🎮 [GAME] Game started - loading first question in ${language}`)
-            setTimeout(() => {
-              loadQuestion(language)
-            }, 1000)
+      setRoom(prevRoom => {
+        // Prevent unnecessary re-renders if room data is the same
+        if (JSON.stringify(prevRoom) === JSON.stringify(updatedRoom)) {
+          console.log("🔄 Room data unchanged, skipping update")
+          return prevRoom
+        }
+        
+        // Check if game just started
+        if (prevRoom?.game_state === "lobby" && updatedRoom.game_state === "playing") {
+          console.log("🎮 Game started, loading initial question")
+          const currentPlayer = updatedRoom.players.find(p => p.id === playerId)
+          if (currentPlayer?.language) {
+            const language = updatedRoom.game_mode === "competition" ? updatedRoom.host_language : currentPlayer.language
+            if (language) {
+              setTimeout(() => loadQuestion(language, true), 1000) // Delay to ensure state is updated
+            }
           }
         }
-      }
+        
+        return updatedRoom
+      })
     })
 
+    // Enhanced cooperation mode handlers with better error handling
     newSocket.on("cooperation-challenge", ({ challenge }: { challenge: CooperationChallenge }) => {
       console.log("🤝 Cooperation challenge received:", challenge)
       setCooperationChallenge(challenge)
@@ -423,9 +490,12 @@ export default function RoomPage() {
       if (timerRef.current) {
         clearInterval(timerRef.current)
       }
+      if (questionLoadTimeoutRef.current) {
+        clearTimeout(questionLoadTimeoutRef.current)
+      }
       newSocket.close()
     }
-  }, [roomId, playerId, playerName, isHost, router])
+  }, [roomId, playerId, playerName, isHost, router, loadQuestion])
 
   // Handle page unload
   useEffect(() => {
@@ -441,44 +511,6 @@ export default function RoomPage() {
     }
   }, [socket, roomId, playerId])
 
-  // Debug question loading for all game modes
-  const debugQuestionLoading = async (gameMode: string, language: string) => {
-    console.log(`🔍 [DEBUG] Testing question loading for ${gameMode} mode in ${language}`)
-    setQuestionLoadingError(null)
-    
-    try {
-      const response = await fetch('/api/get-question', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language })
-      })
-
-      console.log(`📡 [DEBUG] Question API response status: ${response.status}`)
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-      }
-
-      const data = await response.json()
-      console.log(`✅ [DEBUG] Question loaded successfully:`, data)
-      
-      if (data.success && data.question) {
-        console.log(`📝 [DEBUG] Question details:`)
-        console.log(`  - ID: ${data.question.questionId}`)
-        console.log(`  - English: ${data.question.english}`)
-        console.log(`  - Correct Answer: ${data.question.correctAnswer}`)
-        console.log(`  - Options: ${data.question.options.join(', ')}`)
-        return data.question
-      } else {
-        throw new Error('Invalid question data received')
-      }
-    } catch (error) {
-      console.error(`❌ [DEBUG] Question loading failed:`, error)
-      setQuestionLoadingError(`Failed to load question: ${error.message}`)
-      return null
-    }
-  }
-
   // Get current player
   const currentPlayer = room?.players.find(p => p.id === playerId)
   const isCurrentPlayerHost = currentPlayer?.is_host || false
@@ -487,7 +519,7 @@ export default function RoomPage() {
   const handleLanguageChange = (language: string) => {
     if (!socket || !currentPlayer) return
 
-    console.log(`🌐 [DEBUG] Player ${playerId} selecting language: ${language}`)
+    console.log(`🌐 Player ${playerId} selecting language: ${language}`)
     
     socket.emit("update-language", {
       roomId,
@@ -498,11 +530,7 @@ export default function RoomPage() {
         console.error("❌ Failed to update language:", response.error)
         setError(response.error)
       } else {
-        console.log(`✅ [DEBUG] Language updated successfully to ${language}`)
-        // Test question loading for the selected language
-        if (room?.game_mode) {
-          debugQuestionLoading(room.game_mode, language)
-        }
+        console.log(`✅ Language updated successfully to ${language}`)
       }
     })
   }
@@ -511,14 +539,14 @@ export default function RoomPage() {
   const handleReadyToggle = () => {
     if (!socket) return
 
-    console.log(`⚡ [DEBUG] Player ${playerId} toggling ready status`)
+    console.log(`⚡ Player ${playerId} toggling ready status`)
     
     socket.emit("toggle-ready", { roomId, playerId }, (response: any) => {
       if (response.error) {
         console.error("❌ Failed to toggle ready:", response.error)
         setError(response.error)
       } else {
-        console.log(`✅ [DEBUG] Ready status toggled successfully`)
+        console.log(`✅ Ready status toggled successfully`)
       }
     })
   }
@@ -527,7 +555,7 @@ export default function RoomPage() {
   const handleGameModeChange = (gameMode: string) => {
     if (!socket || !isCurrentPlayerHost) return
 
-    console.log(`🎮 [DEBUG] Host selecting game mode: ${gameMode}`)
+    console.log(`🎮 Host selecting game mode: ${gameMode}`)
     
     socket.emit("update-game-mode", {
       roomId,
@@ -538,11 +566,7 @@ export default function RoomPage() {
         console.error("❌ Failed to update game mode:", response.error)
         setError(response.error)
       } else {
-        console.log(`✅ [DEBUG] Game mode updated to ${gameMode}`)
-        // Test question loading for the new game mode
-        if (currentPlayer?.language) {
-          debugQuestionLoading(gameMode, currentPlayer.language)
-        }
+        console.log(`✅ Game mode updated to ${gameMode}`)
       }
     })
   }
@@ -551,7 +575,7 @@ export default function RoomPage() {
   const handleHostLanguageChange = (hostLanguage: string) => {
     if (!socket || !isCurrentPlayerHost) return
 
-    console.log(`🌐 [DEBUG] Host selecting competition language: ${hostLanguage}`)
+    console.log(`🌐 Host selecting competition language: ${hostLanguage}`)
     
     socket.emit("update-host-language", {
       roomId,
@@ -562,9 +586,7 @@ export default function RoomPage() {
         console.error("❌ Failed to update host language:", response.error)
         setError(response.error)
       } else {
-        console.log(`✅ [DEBUG] Host language updated to ${hostLanguage}`)
-        // Test question loading for competition mode
-        debugQuestionLoading("competition", hostLanguage)
+        console.log(`✅ Host language updated to ${hostLanguage}`)
       }
     })
   }
@@ -589,14 +611,14 @@ export default function RoomPage() {
   const handleStartGame = () => {
     if (!socket || !isCurrentPlayerHost) return
 
-    console.log(`🎮 [DEBUG] Starting game in ${room?.game_mode} mode`)
+    console.log(`🎮 Starting game in ${room?.game_mode} mode`)
     
     socket.emit("start-game", { roomId, playerId }, (response: any) => {
       if (response.error) {
         console.error("❌ Failed to start game:", response.error)
         setError(response.error)
       } else {
-        console.log(`✅ [DEBUG] Game started successfully`)
+        console.log(`✅ Game started successfully`)
       }
     })
   }
@@ -604,15 +626,6 @@ export default function RoomPage() {
   // Handle restart
   const handleRestart = () => {
     if (!socket || !isCurrentPlayerHost) return
-
-    // Clear current question state
-    setCurrentQuestion(null)
-    setSelectedAnswer("")
-    setTimeLeft(10)
-    if (timerRef.current) {
-      clearInterval(timerRef.current)
-      timerRef.current = null
-    }
 
     socket.emit("restart", { roomId, playerId }, (response: any) => {
       if (response.error) {
@@ -630,11 +643,17 @@ export default function RoomPage() {
     router.push('/')
   }
 
-  // Handle cooperation answer submission
+  // Enhanced cooperation answer submission with better error handling
   const handleCooperationSubmit = async () => {
     if (!cooperationChallenge || !cooperationAnswer.trim()) return
 
+    console.log(`🤝 [COOPERATION] Submitting answer: "${cooperationAnswer.trim()}"`)
+
     try {
+      // Enhanced fetch with timeout and better error handling
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
+
       const response = await fetch('/api/validate-cooperation-answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -643,13 +662,24 @@ export default function RoomPage() {
           answer: cooperationAnswer.trim(),
           language: cooperationChallenge.language,
           usedWords: room?.used_words || []
-        })
+        }),
+        signal: controller.signal
       })
 
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
       const result = await response.json()
+      console.log(`📡 [COOPERATION] Validation result:`, result)
 
       if (result.isCorrect && !result.isUsed) {
         // Correct answer
+        console.log(`✅ [COOPERATION] Correct answer!`)
+        await audio.playSuccess()
+        
         socket?.emit("cooperation-answer", {
           roomId,
           playerId,
@@ -662,14 +692,26 @@ export default function RoomPage() {
         })
       } else {
         // Wrong answer or already used
-        console.log("❌ Cooperation answer result:", result.message)
+        console.log(`❌ [COOPERATION] ${result.message}`)
+        await audio.playFailure()
         setError(result.message)
         setTimeout(() => setError(null), 3000)
       }
     } catch (error) {
-      console.error("❌ Error validating cooperation answer:", error)
-      setError("Failed to validate answer")
-      setTimeout(() => setError(null), 3000)
+      console.error("❌ [COOPERATION] Error validating answer:", error)
+      
+      let errorMessage = "Failed to validate answer"
+      if (error.name === 'AbortError') {
+        errorMessage = "Request timed out - please try again"
+      } else if (error.message.includes('ECONNREFUSED')) {
+        errorMessage = "Cannot connect to validation service"
+      } else {
+        errorMessage = `Validation failed: ${error.message}`
+      }
+      
+      setError(errorMessage)
+      setTimeout(() => setError(null), 5000)
+      await audio.playFailure()
     }
   }
 
@@ -791,6 +833,23 @@ export default function RoomPage() {
           <Card className="mb-6 border-orange-200 bg-orange-50">
             <CardContent className="p-4">
               <p className="text-orange-700 text-center">⚠️ {questionLoadingError}</p>
+              <div className="mt-2 text-center">
+                <Button 
+                  onClick={() => {
+                    const currentPlayer = room?.players.find(p => p.id === playerId)
+                    if (currentPlayer?.language) {
+                      const language = room.game_mode === "competition" ? room.host_language : currentPlayer.language
+                      if (language) {
+                        loadQuestion(language, true)
+                      }
+                    }
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  Retry Loading Question
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -806,8 +865,8 @@ export default function RoomPage() {
                 <p>Current Player: {currentPlayer?.name || 'Not found'}</p>
                 <p>Is Host: {isCurrentPlayerHost ? 'Yes' : 'No'}</p>
                 <p>Game Mode: {room.game_mode || 'Not set'}</p>
-                <p>Current Question: {currentQuestion ? 'Loaded' : 'None'}</p>
-                <p>Question Loading: {questionLoadingError ? 'Error' : 'OK'}</p>
+                <p>Question Loading: {questionLoadingError ? 'Error' : isLoadingQuestion ? 'Loading' : currentQuestion ? 'Loaded' : 'None'}</p>
+                <p>Audio Loaded: {audio.getLoadedSounds().join(', ') || 'None'}</p>
               </div>
             </CardContent>
           </Card>
@@ -1175,7 +1234,7 @@ export default function RoomPage() {
                       <div className="mobile-text-sm text-gray-600">Your Score</div>
                     </div>
                     <div className="text-center">
-                      <div className="mobile-text-2xl font-bold text-green-600">
+                      <div className="mobile-text-lg font-bold text-gray-600">
                         {room.target_score}
                       </div>
                       <div className="mobile-text-sm text-gray-600">Target</div>
@@ -1216,40 +1275,40 @@ export default function RoomPage() {
                 <CardHeader className="mobile-padding">
                   <div className="flex items-center justify-between">
                     <CardTitle className="mobile-text-lg">
-                      Translate: "{currentQuestion.english}"
+                      Translate: <span className="text-blue-600">{currentQuestion.english}</span>
                     </CardTitle>
                     <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-gray-500" />
+                      <Timer className="h-4 w-4 text-gray-500" />
                       <span className={`font-bold ${timeLeft <= 3 ? 'text-red-600' : 'text-gray-700'}`}>
                         {timeLeft}s
                       </span>
                     </div>
                   </div>
-                  <Progress value={(timeLeft / 10) * 100} className="mt-2" />
+                  <Progress 
+                    value={(timeLeft / 10) * 100} 
+                    className={`h-2 ${timeLeft <= 3 ? 'bg-red-100' : 'bg-blue-100'}`}
+                  />
                 </CardHeader>
                 <CardContent className="mobile-spacing-md mobile-padding">
-                  <div className="grid grid-cols-1 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {currentQuestion.options.map((option, index) => (
                       <SoundButton
                         key={index}
-                        onClick={() => {
-                          setSelectedAnswer(option)
-                          handleAnswerSubmit(option, currentQuestion.correctAnswer, room.game_mode === "practice")
-                        }}
-                        variant={selectedAnswer === option ? "default" : "outline"}
+                        onClick={() => handleAnswerSubmit(option, currentQuestion.correctAnswer)}
                         disabled={isAnswering || timeLeft <= 0}
-                        className="mobile-btn-lg w-full justify-start text-left"
+                        variant={selectedAnswer === option ? "default" : "outline"}
+                        className="mobile-btn-lg text-left justify-start p-4 h-auto"
+                        soundType={option === currentQuestion.correctAnswer ? "success" : "failure"}
                       >
-                        <span className="font-medium mr-2">{String.fromCharCode(65 + index)}.</span>
-                        {option}
+                        <span className="font-medium text-base">{option}</span>
                       </SoundButton>
                     ))}
                   </div>
                   
                   {isAnswering && (
                     <div className="mt-4 text-center">
-                      <Loader2 className="h-5 w-5 animate-spin inline mr-2" />
-                      <span className="text-gray-600">Processing answer...</span>
+                      <Loader2 className="h-5 w-5 animate-spin text-blue-600 mx-auto" />
+                      <p className="text-sm text-gray-600 mt-2">Processing answer...</p>
                     </div>
                   )}
                 </CardContent>
@@ -1261,9 +1320,18 @@ export default function RoomPage() {
                   <h3 className="mobile-text-lg font-semibold mb-2">Waiting for Question</h3>
                   <p className="text-gray-600 text-center">Your next question will appear here.</p>
                   {questionLoadingError && (
-                    <div className="mt-4 p-3 bg-red-50 rounded-lg border border-red-200 w-full">
-                      <p className="text-red-700 text-center text-sm">{questionLoadingError}</p>
-                    </div>
+                    <Button 
+                      onClick={() => {
+                        const language = room.game_mode === "competition" ? room.host_language : currentPlayer?.language
+                        if (language) {
+                          loadQuestion(language, true)
+                        }
+                      }}
+                      className="mt-4"
+                      size="sm"
+                    >
+                      Load Question
+                    </Button>
                   )}
                 </CardContent>
               </Card>
@@ -1272,10 +1340,7 @@ export default function RoomPage() {
             {/* Leaderboard */}
             <Card className="mobile-card">
               <CardHeader className="mobile-padding">
-                <CardTitle className="flex items-center gap-2 mobile-text-lg">
-                  <Trophy className="h-5 w-5" />
-                  Leaderboard
-                </CardTitle>
+                <CardTitle className="mobile-text-lg">Leaderboard</CardTitle>
               </CardHeader>
               <CardContent className="mobile-spacing-sm mobile-padding">
                 {room.players
@@ -1287,7 +1352,7 @@ export default function RoomPage() {
                     >
                       <div className="flex items-center gap-3">
                         {index === 0 && (
-                          <Trophy className="h-4 w-4 text-yellow-600" />
+                          <Trophy className="h-5 w-5 text-yellow-600" />
                         )}
                         <span className="font-medium mobile-text-base">{player.name}</span>
                         {player.id === playerId && (

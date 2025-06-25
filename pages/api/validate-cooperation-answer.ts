@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from "next"
 import { WORD_DATABASE, getWordsByCategory } from "../../lib/word-database"
 
-// API endpoint for validating cooperation mode answers
+// API endpoint for validating cooperation mode answers with enhanced error handling
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -10,22 +10,36 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     const { categoryId, answer, language, usedWords = [] } = req.body
 
+    console.log(`🔍 [COOPERATION-API] Validating answer: "${answer}" in ${language} for category ${categoryId}`)
+
     if (!categoryId || !answer || !language) {
-      return res.status(400).json({ error: 'Category ID, answer, and language are required' })
+      console.error('❌ [COOPERATION-API] Missing required parameters')
+      return res.status(400).json({ 
+        error: 'Missing required parameters',
+        message: 'Category ID, answer, and language are required' 
+      })
     }
 
     if (!["french", "german", "russian", "japanese", "spanish"].includes(language)) {
-      return res.status(400).json({ error: 'Invalid language' })
+      console.error(`❌ [COOPERATION-API] Invalid language: ${language}`)
+      return res.status(400).json({ 
+        error: 'Invalid language',
+        message: `Language must be one of: french, german, russian, japanese, spanish` 
+      })
     }
-
-    console.log(`🔍 Validating cooperation answer: "${answer}" in ${language} for category ${categoryId}`)
 
     // Get all words in the category
     const categoryWords = getWordsByCategory(categoryId)
     
     if (categoryWords.length === 0) {
-      return res.status(400).json({ error: 'Invalid category' })
+      console.error(`❌ [COOPERATION-API] Invalid category: ${categoryId}`)
+      return res.status(400).json({ 
+        error: 'Invalid category',
+        message: `Category "${categoryId}" not found` 
+      })
     }
+
+    console.log(`📊 [COOPERATION-API] Found ${categoryWords.length} words in category ${categoryId}`)
 
     // Normalize the answer for comparison (lowercase, trim)
     const normalizedAnswer = answer.toLowerCase().trim()
@@ -37,7 +51,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     })
 
     if (!matchingWord) {
-      console.log(`❌ Answer "${answer}" not found in category ${categoryId} for language ${language}`)
+      console.log(`❌ [COOPERATION-API] Answer "${answer}" not found in category ${categoryId} for language ${language}`)
       return res.status(200).json({
         success: true,
         isCorrect: false,
@@ -52,7 +66,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     const isAlreadyUsed = usedWords.includes(wordId)
 
     if (isAlreadyUsed) {
-      console.log(`⚠️ Word "${answer}" (${wordId}) has already been used`)
+      console.log(`⚠️ [COOPERATION-API] Word "${answer}" (${wordId}) has already been used`)
       return res.status(200).json({
         success: true,
         isCorrect: true,
@@ -63,7 +77,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       })
     }
 
-    console.log(`✅ Correct answer: "${answer}" matches word ${wordId}`)
+    console.log(`✅ [COOPERATION-API] Correct answer: "${answer}" matches word ${wordId}`)
 
     return res.status(200).json({
       success: true,
@@ -75,10 +89,30 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     })
 
   } catch (error) {
-    console.error('Error validating cooperation answer:', error)
-    res.status(500).json({ 
+    console.error('❌ [COOPERATION-API] Error validating answer:', error)
+    
+    // Enhanced error response with more details
+    const errorResponse = {
+      success: false,
       error: 'Failed to validate answer',
-      message: error.message 
-    })
+      message: error.message || 'An unexpected error occurred',
+      timestamp: new Date().toISOString()
+    }
+
+    // Add stack trace in development
+    if (process.env.NODE_ENV === 'development') {
+      errorResponse.stack = error.stack
+    }
+
+    res.status(500).json(errorResponse)
   }
+}
+
+// Export config for better error handling
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '1mb',
+    },
+  },
 }

@@ -1,19 +1,22 @@
-// Audio management utility for the quiz game
+// Enhanced audio management utility for the quiz game
 class AudioManager {
   private sounds: Map<string, HTMLAudioElement> = new Map();
   private isEnabled: boolean = true;
   private volume: number = 0.3; // Default volume (30%)
   private isInitialized: boolean = false;
+  private initializationPromise: Promise<void> | null = null;
 
   constructor() {
     // Only initialize in browser environment
     if (typeof window !== 'undefined') {
-      this.preloadSounds();
+      this.initializationPromise = this.preloadSounds();
     }
   }
 
-  private preloadSounds() {
+  private async preloadSounds(): Promise<void> {
     if (this.isInitialized) return;
+    
+    console.log('🔊 [AUDIO] Initializing audio manager...');
     
     const soundFiles = {
       click: '/sounds/click.mp3',
@@ -21,77 +24,141 @@ class AudioManager {
       failure: '/sounds/failure.mp3',
     };
 
-    Object.entries(soundFiles).forEach(([name, path]) => {
-      try {
-        const audio = new Audio(path);
-        audio.preload = 'auto';
-        audio.volume = this.volume;
-        
-        // Handle loading errors gracefully
-        audio.addEventListener('error', () => {
-          console.warn(`Failed to load sound: ${name} (${path})`);
-        });
+    const loadPromises = Object.entries(soundFiles).map(([name, path]) => {
+      return new Promise<void>((resolve, reject) => {
+        try {
+          const audio = new Audio();
+          audio.preload = 'auto';
+          audio.volume = this.volume;
+          
+          // Handle successful loading
+          audio.addEventListener('canplaythrough', () => {
+            console.log(`✅ [AUDIO] Loaded sound: ${name}`);
+            this.sounds.set(name, audio);
+            resolve();
+          });
 
-        this.sounds.set(name, audio);
-      } catch (error) {
-        console.warn(`Error creating audio for ${name}:`, error);
-      }
+          // Handle loading errors
+          audio.addEventListener('error', (e) => {
+            console.warn(`⚠️ [AUDIO] Failed to load sound: ${name} (${path})`, e);
+            // Don't reject - continue with other sounds
+            resolve();
+          });
+
+          // Set source after event listeners
+          audio.src = path;
+          
+          // Fallback timeout
+          setTimeout(() => {
+            if (!this.sounds.has(name)) {
+              console.warn(`⏰ [AUDIO] Timeout loading sound: ${name}`);
+              resolve();
+            }
+          }, 5000);
+
+        } catch (error) {
+          console.warn(`❌ [AUDIO] Error creating audio for ${name}:`, error);
+          resolve(); // Don't fail the entire initialization
+        }
+      });
     });
 
-    this.isInitialized = true;
+    try {
+      await Promise.all(loadPromises);
+      this.isInitialized = true;
+      console.log(`✅ [AUDIO] Audio manager initialized with ${this.sounds.size} sounds`);
+    } catch (error) {
+      console.error('❌ [AUDIO] Failed to initialize audio manager:', error);
+      this.isInitialized = true; // Mark as initialized to prevent retries
+    }
   }
 
-  public play(soundName: string): void {
-    if (typeof window === 'undefined' || !this.isEnabled) return;
+  public async play(soundName: string): Promise<void> {
+    if (typeof window === 'undefined' || !this.isEnabled) {
+      console.log(`🔇 [AUDIO] Audio disabled or not in browser, skipping: ${soundName}`);
+      return;
+    }
 
-    // Ensure sounds are loaded
-    if (!this.isInitialized) {
-      this.preloadSounds();
+    // Ensure initialization is complete
+    if (this.initializationPromise) {
+      await this.initializationPromise;
     }
 
     const sound = this.sounds.get(soundName);
     if (!sound) {
-      console.warn(`Sound not found: ${soundName}`);
+      console.warn(`🔍 [AUDIO] Sound not found: ${soundName}. Available sounds:`, Array.from(this.sounds.keys()));
       return;
     }
 
     try {
+      console.log(`🔊 [AUDIO] Playing sound: ${soundName}`);
+      
       // Reset the audio to the beginning
       sound.currentTime = 0;
+      sound.volume = this.volume;
       
       // Play the sound
       const playPromise = sound.play();
       
       // Handle play promise (required for some browsers)
       if (playPromise !== undefined) {
-        playPromise.catch((error) => {
-          // Auto-play was prevented, which is normal
-          console.debug(`Audio play prevented for ${soundName}:`, error);
-        });
+        await playPromise;
+        console.log(`✅ [AUDIO] Successfully played: ${soundName}`);
       }
     } catch (error) {
-      console.warn(`Error playing sound ${soundName}:`, error);
+      // Auto-play was prevented or other error occurred
+      console.warn(`⚠️ [AUDIO] Failed to play sound ${soundName}:`, error);
+      
+      // Try to enable audio on user interaction
+      if (error.name === 'NotAllowedError') {
+        console.log('🎵 [AUDIO] Audio blocked by browser - will retry on next user interaction');
+      }
     }
   }
 
   public setVolume(volume: number): void {
     this.volume = Math.max(0, Math.min(1, volume)); // Clamp between 0 and 1
-    this.sounds.forEach((sound) => {
+    console.log(`🔊 [AUDIO] Volume set to: ${Math.round(this.volume * 100)}%`);
+    
+    this.sounds.forEach((sound, name) => {
       sound.volume = this.volume;
     });
   }
 
   public setEnabled(enabled: boolean): void {
     this.isEnabled = enabled;
+    console.log(`🔊 [AUDIO] Audio ${enabled ? 'enabled' : 'disabled'}`);
   }
 
   public isAudioEnabled(): boolean {
     return this.isEnabled;
   }
 
+  public getLoadedSounds(): string[] {
+    return Array.from(this.sounds.keys());
+  }
+
   // Method to test if audio is working
-  public testAudio(): void {
-    this.play('click');
+  public async testAudio(): Promise<void> {
+    console.log('🧪 [AUDIO] Testing audio playback...');
+    await this.play('click');
+  }
+
+  // Method to handle user interaction for enabling audio
+  public async enableAudioContext(): Promise<void> {
+    if (typeof window === 'undefined') return;
+    
+    try {
+      // Create a silent audio context to enable audio
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+        console.log('🎵 [AUDIO] Audio context resumed');
+      }
+      audioContext.close();
+    } catch (error) {
+      console.warn('⚠️ [AUDIO] Failed to enable audio context:', error);
+    }
   }
 }
 
@@ -105,12 +172,23 @@ export const getAudioManager = (): AudioManager => {
   return audioManagerInstance;
 };
 
-// Convenience functions for common sounds
-export const playClickSound = () => getAudioManager().play('click');
-export const playSuccessSound = () => getAudioManager().play('success');
-export const playFailureSound = () => getAudioManager().play('failure');
+// Convenience functions for common sounds with enhanced logging
+export const playClickSound = async () => {
+  console.log('🖱️ [AUDIO] Click sound requested');
+  await getAudioManager().play('click');
+};
 
-// Hook for React components
+export const playSuccessSound = async () => {
+  console.log('✅ [AUDIO] Success sound requested');
+  await getAudioManager().play('success');
+};
+
+export const playFailureSound = async () => {
+  console.log('❌ [AUDIO] Failure sound requested');
+  await getAudioManager().play('failure');
+};
+
+// Hook for React components with enhanced functionality
 export const useAudio = () => {
   const audioManager = getAudioManager();
   
@@ -122,5 +200,7 @@ export const useAudio = () => {
     setEnabled: (enabled: boolean) => audioManager.setEnabled(enabled),
     isEnabled: () => audioManager.isAudioEnabled(),
     testAudio: () => audioManager.testAudio(),
+    enableAudioContext: () => audioManager.enableAudioContext(),
+    getLoadedSounds: () => audioManager.getLoadedSounds(),
   };
 };
