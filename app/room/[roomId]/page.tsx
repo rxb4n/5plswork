@@ -9,8 +9,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Progress } from "@/components/ui/progress"
-import { QuestionDisplay } from "@/components/ui/question-display"
-import { Leaderboard } from "@/components/ui/leaderboard"
 import { 
   Users, 
   Settings, 
@@ -521,36 +519,6 @@ export default function RoomPage() {
     }
   }
 
-  // Handle question answers with sound effects
-  const handleQuestionAnswer = (answer: string, timeLeft: number, correctAnswer: string) => {
-    const isCorrect = answer === correctAnswer
-    
-    // Play appropriate sound effect
-    if (isCorrect) {
-      playSuccessSound()
-    } else {
-      playFailureSound()
-    }
-
-    // Submit answer to server
-    if (socket) {
-      socket.emit("answer", {
-        roomId,
-        playerId,
-        data: {
-          answer,
-          timeLeft,
-          correctAnswer,
-          isPracticeMode: room?.game_mode === "practice"
-        }
-      }, (response: any) => {
-        if (response.error) {
-          setError(response.error)
-        }
-      })
-    }
-  }
-
   // Loading state
   if (isLoading) {
     return (
@@ -1008,32 +976,6 @@ export default function RoomPage() {
           </div>
         )}
 
-        {/* Practice/Competition Mode Gameplay */}
-        {room.game_state === "playing" && (room.game_mode === "practice" || room.game_mode === "competition") && (
-          <div className="mobile-spacing-md">
-            {/* Question Display */}
-            {currentQuestion && (
-              <QuestionDisplay
-                question={currentQuestion}
-                timeLeft={timeLeft}
-                onAnswer={handleQuestionAnswer}
-                disabled={isAnswering}
-                gameMode={room.game_mode}
-              />
-            )}
-
-            {/* Leaderboard - Repositioned to middle/bottom */}
-            <div className="mt-8">
-              <Leaderboard
-                players={room.players}
-                currentPlayerId={playerId!}
-                gameState={room.game_state}
-                targetScore={room.target_score}
-              />
-            </div>
-          </div>
-        )}
-
         {/* Cooperation Mode Gameplay */}
         {room.game_state === "playing" && room.game_mode === "cooperation" && (
           <div className="mobile-spacing-md">
@@ -1244,18 +1186,6 @@ export default function RoomPage() {
                 )}
               </CardContent>
             </Card>
-
-            {/* Final Leaderboard for Practice/Competition modes */}
-            {(room.game_mode === "practice" || room.game_mode === "competition") && (
-              <div className="mt-6">
-                <Leaderboard
-                  players={room.players}
-                  currentPlayerId={playerId!}
-                  gameState={room.game_state}
-                  targetScore={room.target_score}
-                />
-              </div>
-            )}
           </div>
         )}
       </div>

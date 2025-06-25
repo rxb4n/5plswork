@@ -38,16 +38,6 @@ const roomActivityTracker = new Map<string, {
   players: Set<string>
 }>()
 
-// Cooperation mode challenge tracking
-const cooperationChallenges = new Map<string, {
-  challengeId: string
-  categoryId: string
-  language: string
-  targetPlayerId: string
-  startTime: Date
-  timeout?: NodeJS.Timeout
-}>()
-
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (!res.socket.server.io) {
     await ensureDbInitialized()
@@ -650,10 +640,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             const newUsedWords = [...(room.used_words || []), wordId]
             const newScore = (room.cooperation_score || 0) + 1
 
+            // Switch to the other player for the next challenge
+            const otherPlayer = room.players.find(p => p.id !== playerId)
+            
             await updateRoom(roomId, {
               used_words: newUsedWords,
               cooperation_score: newScore,
-              cooperation_waiting: true
+              cooperation_waiting: true,
+              current_challenge_player: otherPlayer?.id || playerId
             })
 
             // Send waiting state and start next challenge
@@ -680,6 +674,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
           const newLives = Math.max(0, (room.cooperation_lives || 3) - 1)
           
+          // Switch to the other player for the next challenge
+          const otherPlayer = room.players.find(p => p.id !== playerId)
+          
           if (newLives === 0) {
             await updateRoom(roomId, {
               cooperation_lives: newLives,
@@ -688,7 +685,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           } else {
             await updateRoom(roomId, {
               cooperation_lives: newLives,
-              cooperation_waiting: true
+              cooperation_waiting: true,
+              current_challenge_player: otherPlayer?.id || playerId
             })
 
             // Send waiting state and start next challenge
@@ -823,7 +821,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.status(200).end()
 }
 
-// Enhanced function to start a cooperation challenge with language-based turns
+// Enhanced function to start a cooperation challenge with proper language-based turn system
 async function startCooperationChallenge(roomId: string, io: SocketIOServer) {
   try {
     const room = await getRoom(roomId)
@@ -839,12 +837,14 @@ async function startCooperationChallenge(roomId: string, io: SocketIOServer) {
       return
     }
 
-    // Language-based turn system: select a random player and use their language
-    const players = room.players.filter(p => p.language)
-    if (players.length === 0) return
+    // Get the current challenge player and their language
+    const currentChallengePlayer = room.players.find(p => p.id === room.current_challenge_player)
+    if (!currentChallengePlayer || !currentChallengePlayer.language) {
+      console.error("❌ [COOPERATION] No valid challenge player found")
+      return
+    }
 
-    const randomPlayer = players[Math.floor(Math.random() * players.length)]
-    const challengeLanguage = randomPlayer.language!
+    const challengeLanguage = currentChallengePlayer.language
 
     // Create challenge directly instead of using external fetch
     const categories = ["colors", "animals", "food", "vehicles", "clothing", "sports", "household"]
@@ -873,7 +873,6 @@ async function startCooperationChallenge(roomId: string, io: SocketIOServer) {
     // Update room with current challenge info
     await updateRoom(roomId, {
       current_category: challenge.categoryId,
-      current_challenge_player: randomPlayer.id,
       cooperation_waiting: false
     })
 
