@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useParams, useSearchParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { SoundButton } from "@/components/ui/sound-button"
@@ -232,6 +232,7 @@ export default function RoomPage() {
       console.log("📡 Room updated:", updatedRoom)
       setRoom(updatedRoom)
 
+    })
 
     newSocket.on("cooperation-challenge", ({ challenge }: { challenge: CooperationChallenge }) => {
       console.log("🤝 Cooperation challenge received:", challenge)
