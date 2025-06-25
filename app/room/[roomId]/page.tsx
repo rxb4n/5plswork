@@ -246,6 +246,9 @@ export default function RoomPage() {
           clearTimeout(questionUpdateTimeoutRef.current)
         }
         
+        // Debounce question loading by 300ms
+      }
+    })
 
     newSocket.on("cooperation-challenge", ({ challenge }: { challenge: CooperationChallenge }) => {
       console.log("🤝 Cooperation challenge received:", challenge)
