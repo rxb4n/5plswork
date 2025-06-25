@@ -6,7 +6,7 @@ import { Button } from './ui/button'
 import { Slider } from './ui/slider'
 import { Switch } from './ui/switch'
 import { Volume2, VolumeX, TestTube } from 'lucide-react'
-import { useAudio } from '../lib/audio'
+import { useAudio } from '@/lib/audio'
 
 export function AudioSettings() {
   const audio = useAudio()
@@ -14,6 +14,9 @@ export function AudioSettings() {
   const [isEnabled, setIsEnabled] = useState(true)
 
   useEffect(() => {
+    // Only run in browser environment
+    if (typeof window === 'undefined') return;
+
     // Load settings from localStorage
     const savedVolume = localStorage.getItem('quiz-audio-volume')
     const savedEnabled = localStorage.getItem('quiz-audio-enabled')
@@ -29,19 +32,25 @@ export function AudioSettings() {
       setIsEnabled(enabled)
       audio.setEnabled(enabled)
     }
-  }, [])
+  }, [audio])
 
   const handleVolumeChange = (value: number[]) => {
     const newVolume = value[0]
     setVolume(newVolume)
     audio.setVolume(newVolume / 100)
-    localStorage.setItem('quiz-audio-volume', newVolume.toString())
+    
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('quiz-audio-volume', newVolume.toString())
+    }
   }
 
   const handleEnabledChange = (enabled: boolean) => {
     setIsEnabled(enabled)
     audio.setEnabled(enabled)
-    localStorage.setItem('quiz-audio-enabled', enabled.toString())
+    
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('quiz-audio-enabled', enabled.toString())
+    }
   }
 
   const handleTestAudio = () => {

@@ -3,12 +3,18 @@ class AudioManager {
   private sounds: Map<string, HTMLAudioElement> = new Map();
   private isEnabled: boolean = true;
   private volume: number = 0.3; // Default volume (30%)
+  private isInitialized: boolean = false;
 
   constructor() {
-    this.preloadSounds();
+    // Only initialize in browser environment
+    if (typeof window !== 'undefined') {
+      this.preloadSounds();
+    }
   }
 
   private preloadSounds() {
+    if (this.isInitialized) return;
+    
     const soundFiles = {
       click: '/sounds/click.mp3',
       success: '/sounds/success.mp3',
@@ -31,10 +37,17 @@ class AudioManager {
         console.warn(`Error creating audio for ${name}:`, error);
       }
     });
+
+    this.isInitialized = true;
   }
 
   public play(soundName: string): void {
-    if (!this.isEnabled) return;
+    if (typeof window === 'undefined' || !this.isEnabled) return;
+
+    // Ensure sounds are loaded
+    if (!this.isInitialized) {
+      this.preloadSounds();
+    }
 
     const sound = this.sounds.get(soundName);
     if (!sound) {
@@ -83,15 +96,24 @@ class AudioManager {
 }
 
 // Create a singleton instance
-export const audioManager = new AudioManager();
+let audioManagerInstance: AudioManager | null = null;
+
+export const getAudioManager = (): AudioManager => {
+  if (!audioManagerInstance) {
+    audioManagerInstance = new AudioManager();
+  }
+  return audioManagerInstance;
+};
 
 // Convenience functions for common sounds
-export const playClickSound = () => audioManager.play('click');
-export const playSuccessSound = () => audioManager.play('success');
-export const playFailureSound = () => audioManager.play('failure');
+export const playClickSound = () => getAudioManager().play('click');
+export const playSuccessSound = () => getAudioManager().play('success');
+export const playFailureSound = () => getAudioManager().play('failure');
 
 // Hook for React components
 export const useAudio = () => {
+  const audioManager = getAudioManager();
+  
   return {
     playClick: playClickSound,
     playSuccess: playSuccessSound,
