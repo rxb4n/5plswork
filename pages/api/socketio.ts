@@ -271,6 +271,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               status: 403 
             })
           }
+
+          // Check cooperation mode player limit
+          if (room.game_mode === "cooperation" && room.players.length >= 2) {
+            return callback({
+              error: "Cannot join: Cooperation mode is limited to 2 players.",
+              status: 403
+            })
+          }
           
           const player: Omit<Player, "last_seen"> = {
             id: playerId,
@@ -335,8 +343,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           
           // Track room activity
           updateRoomActivityTracker(roomId, playerId)
+
+          // Initialize cooperation mode fields if needed
+          const updateData: any = { game_mode: data.gameMode }
+          if (data.gameMode === "cooperation") {
+            updateData.cooperation_lives = 3
+            updateData.cooperation_score = 0
+            updateData.used_words = []
+            updateData.current_category = null
+            updateData.current_challenge_player = null
+          }
           
-          const success = await updateRoom(roomId, { game_mode: data.gameMode })
+          const success = await updateRoom(roomId, updateData)
           if (!success) {
             return callback({ error: "Failed to update game mode", status: 500 })
           }
@@ -371,7 +389,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           // Reset game mode and related settings
           const success = await updateRoom(roomId, { 
             game_mode: null,
-            host_language: null
+            host_language: null,
+            cooperation_lives: null,
+            cooperation_score: null,
+            used_words: null,
+            current_category: null,
+            current_challenge_player: null
           })
           if (!success) {
             return callback({ error: "Failed to reset game mode", status: 500 })
@@ -483,7 +506,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
           
           // Check requirements based on game mode
-          if (room.game_mode === "practice" && !player.language) {
+          if ((room.game_mode === "practice" || room.game_mode === "cooperation") && !player.language) {
             return callback({ error: "Select a language first", status: 400 })
           }
           if (room.game_mode === "competition" && !room.host_language) {
@@ -577,6 +600,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             if (!room.host_language) {
               return callback({ error: "Host must select a competition language first", status: 400 })
             }
+          } else if (room.game_mode === "cooperation") {
+            if (room.players.length !== 2) {
+              return callback({ error: "Cooperation mode requires exactly 2 players", status: 400 })
+            }
+            const playersWithoutLanguage = room.players.filter((p) => !p.language)
+            if (playersWithoutLanguage.length > 0) {
+              return callback({ 
+                error: `All players must select a language. Missing: ${playersWithoutLanguage.map(p => p.name).join(", ")}`, 
+                status: 400 
+              })
+            }
           }
           
           const playersNotReady = room.players.filter((p) => !p.ready)
@@ -604,6 +638,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
+
+          // Start cooperation mode challenges
+          if (room.game_mode === "cooperation") {
+            startCooperationChallenge(roomId, io)
+          }
+          
           broadcastAvailableRooms(io)
         } catch (error) {
           console.error(`❌ Error starting game for room ${roomId}:`, error)
@@ -669,6 +709,83 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
+      // NEW: Cooperation mode handlers
+      socket.on("cooperation-answer", async ({ roomId, playerId, data }, callback) => {
+        try {
+          console.log(`🤝 Processing cooperation answer for player ${playerId}`)
+          
+          const room = await getRoom(roomId)
+          if (!room || room.game_mode !== "cooperation") {
+            return callback({ error: "Invalid room or game mode", status: 400 })
+          }
+
+          const { challengeId, answer, isCorrect, wordId } = data
+
+          if (isCorrect) {
+            // Add word to used words and increment score
+            const newUsedWords = [...(room.used_words || []), wordId]
+            const newScore = (room.cooperation_score || 0) + 1
+
+            await updateRoom(roomId, {
+              used_words: newUsedWords,
+              cooperation_score: newScore
+            })
+
+            console.log(`✅ Cooperation correct answer! New score: ${newScore}`)
+
+            // Start next challenge after a short delay
+            setTimeout(() => {
+              startCooperationChallenge(roomId, io)
+            }, 3000)
+          }
+
+          const updatedRoom = await getRoom(roomId)
+          io.to(roomId).emit("room-update", { room: updatedRoom })
+
+        } catch (error) {
+          console.error(`❌ Error processing cooperation answer:`, error)
+        }
+      })
+
+      socket.on("cooperation-timeout", async ({ roomId, playerId, data }, callback) => {
+        try {
+          console.log(`⏰ Cooperation timeout for player ${playerId}`)
+          
+          const room = await getRoom(roomId)
+          if (!room || room.game_mode !== "cooperation") {
+            return
+          }
+
+          const newLives = Math.max(0, (room.cooperation_lives || 3) - 1)
+          
+          if (newLives === 0) {
+            // Game over
+            await updateRoom(roomId, {
+              cooperation_lives: newLives,
+              game_state: "finished"
+            })
+            console.log(`💀 Cooperation game over! Final score: ${room.cooperation_score || 0}`)
+          } else {
+            // Continue with fewer lives
+            await updateRoom(roomId, {
+              cooperation_lives: newLives
+            })
+            console.log(`💔 Lost a life! Lives remaining: ${newLives}`)
+
+            // Start next challenge after a short delay
+            setTimeout(() => {
+              startCooperationChallenge(roomId, io)
+            }, 3000)
+          }
+
+          const updatedRoom = await getRoom(roomId)
+          io.to(roomId).emit("room-update", { room: updatedRoom })
+
+        } catch (error) {
+          console.error(`❌ Error processing cooperation timeout:`, error)
+        }
+      })
+
       socket.on("restart", async ({ roomId, playerId }, callback) => {
         try {
           const room = await getRoom(roomId)
@@ -692,6 +809,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             winner_id: null,
             question_count: 0,
             target_score: 100,
+            cooperation_lives: null,
+            cooperation_score: null,
+            used_words: null,
+            current_category: null,
+            current_challenge_player: null
           })
           
           for (const p of room.players) {
@@ -791,6 +913,60 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.status(200).end()
 }
 
+// Function to start a cooperation challenge
+async function startCooperationChallenge(roomId: string, io: SocketIOServer) {
+  try {
+    const room = await getRoom(roomId)
+    if (!room || room.game_mode !== "cooperation" || room.game_state !== "playing") {
+      return
+    }
+
+    // Check if game should end
+    if ((room.cooperation_lives || 3) <= 0) {
+      await updateRoom(roomId, { game_state: "finished" })
+      const finalRoom = await getRoom(roomId)
+      io.to(roomId).emit("room-update", { room: finalRoom })
+      return
+    }
+
+    // Select a random player and their language
+    const players = room.players.filter(p => p.language)
+    if (players.length === 0) return
+
+    const randomPlayer = players[Math.floor(Math.random() * players.length)]
+    const challengeLanguage = randomPlayer.language!
+
+    console.log(`🎯 Starting cooperation challenge for room ${roomId} in ${challengeLanguage}`)
+
+    // Get a random category challenge
+    const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/get-cooperation-category`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language: challengeLanguage })
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      const challenge = data.category
+
+      // Update room with current challenge info
+      await updateRoom(roomId, {
+        current_category: challenge.categoryId,
+        current_challenge_player: randomPlayer.id
+      })
+
+      // Send challenge to all players
+      io.to(roomId).emit("cooperation-challenge", { challenge })
+      console.log(`✅ Cooperation challenge sent to room ${roomId}:`, challenge)
+    } else {
+      console.error("Failed to fetch cooperation category")
+    }
+
+  } catch (error) {
+    console.error("Error starting cooperation challenge:", error)
+  }
+}
+
 // Function to get available rooms with enhanced game mode information
 async function getAvailableRooms() {
   try {
@@ -819,7 +995,7 @@ async function getAvailableRooms() {
       const availableRooms = roomsResult.rows.map(row => ({
         id: row.id,
         playerCount: parseInt(row.player_count),
-        maxPlayers: 8,
+        maxPlayers: row.game_mode === "cooperation" ? 2 : 8,
         status: "waiting" as const,
         targetScore: row.target_score || 100,
         gameMode: row.game_mode,
