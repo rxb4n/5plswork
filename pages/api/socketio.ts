@@ -910,7 +910,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.status(200).end()
 }
 
-// Enhanced function to start a cooperation challenge
+// Enhanced function to start a cooperation challenge with language-based turns
 async function startCooperationChallenge(roomId: string, io: SocketIOServer) {
   try {
     const room = await getRoom(roomId)
@@ -926,14 +926,15 @@ async function startCooperationChallenge(roomId: string, io: SocketIOServer) {
       return
     }
 
-    // Select a random player and their language
+    // Language-based turn system: select a random player and use their language
     const players = room.players.filter(p => p.language)
     if (players.length === 0) return
 
     const randomPlayer = players[Math.floor(Math.random() * players.length)]
     const challengeLanguage = randomPlayer.language!
 
-    console.log(`🎯 Starting cooperation challenge for room ${roomId} in ${challengeLanguage}`)
+    console.log(`🎯 [COOPERATION] Starting challenge for room ${roomId}`)
+    console.log(`🌐 [COOPERATION] Language: ${challengeLanguage} (Player: ${randomPlayer.name})`)
 
     // Create challenge directly instead of using external fetch
     const categories = ["colors", "animals", "food", "vehicles", "clothing", "sports", "household"]
@@ -968,10 +969,10 @@ async function startCooperationChallenge(roomId: string, io: SocketIOServer) {
 
     // Send challenge to all players
     io.to(roomId).emit("cooperation-challenge", { challenge })
-    console.log(`✅ Cooperation challenge sent to room ${roomId}:`, challenge)
+    console.log(`✅ [COOPERATION] Challenge sent to room ${roomId}:`, challenge)
 
   } catch (error) {
-    console.error("❌ Error starting cooperation challenge:", error)
+    console.error("❌ [COOPERATION] Error starting cooperation challenge:", error)
     // Send error to room
     io.to(roomId).emit("cooperation-error", { 
       message: "Failed to start cooperation challenge",

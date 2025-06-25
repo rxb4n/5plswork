@@ -9,8 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Progress } from "@/components/ui/progress"
-import { Leaderboard } from "@/components/ui/leaderboard"
 import { QuestionDisplay } from "@/components/ui/question-display"
+import { Leaderboard } from "@/components/ui/leaderboard"
 import { 
   Users, 
   Settings, 
@@ -130,10 +130,11 @@ export default function RoomPage() {
   const [cooperationTyping, setCooperationTyping] = useState<{ playerId: string; text: string } | null>(null)
   const [isCooperationWaiting, setIsCooperationWaiting] = useState(false)
   const [cooperationError, setCooperationError] = useState<string | null>(null)
+  const [cooperationCountdown, setCooperationCountdown] = useState(5)
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const cooperationTimerRef = useRef<NodeJS.Timeout | null>(null)
   const activityPingRef = useRef<NodeJS.Timeout | null>(null)
-  const questionTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Initialize socket connection
   useEffect(() => {
@@ -237,6 +238,10 @@ export default function RoomPage() {
       setCooperationAnswer("")
       setCooperationTyping(null)
       setCooperationError(null)
+      
+      // Start 5-second countdown timer
+      setCooperationCountdown(5)
+      startCooperationTimer()
     })
 
     newSocket.on("cooperation-waiting", ({ isWaiting }: { isWaiting: boolean }) => {
@@ -246,7 +251,15 @@ export default function RoomPage() {
         setCooperationChallenge(null)
         setCooperationAnswer("")
         setCooperationTyping(null)
+        stopCooperationTimer()
       }
+    })
+
+    newSocket.on("cooperation-error", ({ message, error }: { message: string; error: string }) => {
+      console.error("❌ Cooperation error:", message, error)
+      setCooperationError(message)
+      setIsCooperationWaiting(false)
+      stopCooperationTimer()
     })
 
     newSocket.on("cooperation-typing", ({ playerId: typingPlayerId, text }: { playerId: string; text: string }) => {
@@ -301,12 +314,47 @@ export default function RoomPage() {
       if (timerRef.current) {
         clearInterval(timerRef.current)
       }
-      if (questionTimerRef.current) {
-        clearInterval(questionTimerRef.current)
+      if (cooperationTimerRef.current) {
+        clearInterval(cooperationTimerRef.current)
       }
       newSocket.close()
     }
   }, [roomId, playerId, playerName, isHost, router])
+
+  // Cooperation timer functions
+  const startCooperationTimer = () => {
+    stopCooperationTimer() // Clear any existing timer
+    
+    cooperationTimerRef.current = setInterval(() => {
+      setCooperationCountdown(prev => {
+        if (prev <= 1) {
+          // Timer expired - lose a life
+          handleCooperationTimeout()
+          return 5
+        }
+        return prev - 1
+      })
+    }, 1000)
+  }
+
+  const stopCooperationTimer = () => {
+    if (cooperationTimerRef.current) {
+      clearInterval(cooperationTimerRef.current)
+      cooperationTimerRef.current = null
+    }
+  }
+
+  const handleCooperationTimeout = () => {
+    console.log("⏰ Cooperation timer expired")
+    if (socket && room) {
+      socket.emit("cooperation-timeout", {
+        roomId,
+        playerId,
+        data: { reason: "timeout" }
+      })
+    }
+    stopCooperationTimer()
+  }
 
   // Handle page unload
   useEffect(() => {
@@ -322,26 +370,11 @@ export default function RoomPage() {
     }
   }, [socket, roomId, playerId])
 
-  // Question timer management
-  useEffect(() => {
-    if (currentQuestion && room?.game_state === "playing" && timeLeft > 0) {
-      questionTimerRef.current = setTimeout(() => {
-        setTimeLeft(prev => Math.max(0, prev - 1))
-      }, 1000)
-    }
-
-    return () => {
-      if (questionTimerRef.current) {
-        clearTimeout(questionTimerRef.current)
-      }
-    }
-  }, [currentQuestion, timeLeft, room?.game_state])
-
   // Load question for practice/competition modes
   const loadQuestion = async (language: string) => {
     try {
-      console.log(`🔍 Loading question for ${language}`)
       setQuestionLoadingError(null)
+      console.log(`🔍 Loading question for ${language}`)
       
       const response = await fetch('/api/get-question', {
         method: 'POST',
@@ -360,6 +393,7 @@ export default function RoomPage() {
         setCurrentQuestion(data.question)
         setTimeLeft(10)
         setQuestionStartTime(Date.now())
+        startQuestionTimer()
         return data.question
       } else {
         throw new Error('Invalid question data received')
@@ -369,6 +403,23 @@ export default function RoomPage() {
       setQuestionLoadingError(`Failed to load question: ${error.message}`)
       return null
     }
+  }
+
+  // Question timer for practice/competition modes
+  const startQuestionTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+    }
+    
+    timerRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current!)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
   }
 
   // Get current player
@@ -495,13 +546,13 @@ export default function RoomPage() {
     })
   }
 
-  // Handle answer submission
+  // Handle answer submission for practice/competition modes
   const handleAnswerSubmit = (answer: string, timeLeft: number, correctAnswer: string) => {
-    if (!socket || !currentQuestion) return
+    if (!socket || !room || !currentPlayer) return
 
-    console.log(`📝 Submitting answer: "${answer}" (time left: ${timeLeft})`)
+    console.log(`📝 Submitting answer: ${answer}`)
     
-    const isPracticeMode = room?.game_mode === "practice"
+    const isPracticeMode = room.game_mode === "practice"
     
     socket.emit("answer", {
       roomId,
@@ -510,8 +561,7 @@ export default function RoomPage() {
         answer,
         timeLeft,
         correctAnswer,
-        isPracticeMode,
-        questionId: currentQuestion.questionId
+        isPracticeMode
       }
     }, (response: any) => {
       if (response.error) {
@@ -520,18 +570,16 @@ export default function RoomPage() {
       } else {
         console.log(`✅ Answer submitted successfully`)
         
-        // Load next question if game is still playing
-        if (response.room?.game_state === "playing") {
-          const language = room?.game_mode === "practice" 
-            ? currentPlayer?.language 
-            : room?.host_language
+        // Load next question after a short delay
+        setTimeout(() => {
+          const language = room.game_mode === "practice" 
+            ? currentPlayer.language 
+            : room.host_language
           
-          if (language) {
-            setTimeout(() => {
-              loadQuestion(language)
-            }, 2000) // Small delay for feedback
+          if (language && room.game_state === "playing") {
+            loadQuestion(language)
           }
-        }
+        }, 2000)
       }
     })
   }
@@ -544,10 +592,6 @@ export default function RoomPage() {
       if (response.error) {
         console.error("❌ Failed to restart game:", response.error)
         setError(response.error)
-      } else {
-        setCurrentQuestion(null)
-        setTimeLeft(10)
-        setQuestionLoadingError(null)
       }
     })
   }
@@ -557,66 +601,38 @@ export default function RoomPage() {
     if (isLeavingRoom) return // Prevent double-clicking
     
     setIsLeavingRoom(true)
-    console.log(`🚪 [LEAVE] Player ${playerId} initiating leave room process`)
-
+    console.log(`🚪 Player ${playerId} leaving room ${roomId}`)
+    
     try {
-      // Method 1: Socket.IO leave (primary method)
+      // Method 1: Socket.IO leave (primary)
       if (socket && socket.connected) {
-        console.log(`🔌 [LEAVE] Attempting Socket.IO leave for room ${roomId}`)
         socket.emit("leave-room", { roomId, playerId })
-        
-        // Give socket time to process
+        // Wait a moment for the socket event to process
         await new Promise(resolve => setTimeout(resolve, 500))
       }
 
-      // Method 2: API call leave (backup method)
+      // Method 2: API call leave (backup)
       try {
-        console.log(`📡 [LEAVE] Attempting API leave for player ${playerId}`)
         const response = await fetch('/api/leave-room', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            roomId, 
-            playerId, 
-            reason: 'manual_leave' 
-          })
+          body: JSON.stringify({ roomId, playerId, reason: 'manual_leave' })
         })
-
-        const result = await response.json()
-        console.log(`📡 [LEAVE] API response:`, result)
         
-        if (result.success) {
-          console.log(`✅ [LEAVE] Successfully left room via API`)
-        } else {
-          console.log(`⚠️ [LEAVE] API leave failed, but continuing with navigation`)
+        if (response.ok) {
+          const result = await response.json()
+          console.log('✅ API leave successful:', result)
         }
       } catch (apiError) {
-        console.error(`❌ [LEAVE] API leave failed:`, apiError)
-        // Continue anyway - don't block navigation
+        console.log('⚠️ API leave failed, but continuing with navigation:', apiError)
       }
 
-      // Method 3: Cleanup and navigate (always execute)
-      console.log(`🏠 [LEAVE] Navigating to home page`)
-      
-      // Clean up timers and intervals
-      if (activityPingRef.current) {
-        clearInterval(activityPingRef.current)
-        activityPingRef.current = null
-      }
-      if (questionTimerRef.current) {
-        clearTimeout(questionTimerRef.current)
-        questionTimerRef.current = null
-      }
-
-      // Navigate to home
+      // Method 3: Always navigate (guaranteed exit)
       router.push('/')
-
     } catch (error) {
-      console.error(`❌ [LEAVE] Unexpected error during leave:`, error)
-      // Still navigate away even if cleanup fails
+      console.error('❌ Error during leave room:', error)
+      // Still navigate even if cleanup fails
       router.push('/')
-    } finally {
-      setIsLeavingRoom(false)
     }
   }
 
@@ -639,7 +655,8 @@ export default function RoomPage() {
       const result = await response.json()
 
       if (result.isCorrect && !result.isUsed) {
-        // Correct answer
+        // Correct answer - stop timer
+        stopCooperationTimer()
         socket?.emit("cooperation-answer", {
           roomId,
           playerId,
@@ -671,60 +688,13 @@ export default function RoomPage() {
     }
   }
 
-  // Start cooperation mode with enhanced error handling
-  const startCooperationMode = async () => {
-    if (!room || room.game_mode !== "cooperation") return
-
-    try {
-      setCooperationError(null)
-      console.log(`🤝 [COOPERATION] Starting cooperation mode for room ${roomId}`)
-
-      // Use internal API call instead of external fetch to avoid ECONNREFUSED
-      const language = currentPlayer?.language
-      if (!language) {
-        throw new Error("Language not selected")
-      }
-
-      // Create cooperation challenge directly
-      const categories = ["colors", "animals", "food", "vehicles", "clothing", "sports", "household"]
-      const randomCategory = categories[Math.floor(Math.random() * categories.length)]
-      
-      const categoryTranslations = {
-        colors: { french: "Couleurs", spanish: "Colores", german: "Farben", japanese: "色", russian: "Цвета" },
-        animals: { french: "Animaux", spanish: "Animales", german: "Tiere", japanese: "動物", russian: "Животные" },
-        food: { french: "Nourriture", spanish: "Comida", german: "Essen", japanese: "食べ物", russian: "Еда" },
-        vehicles: { french: "Véhicules", spanish: "Vehículos", german: "Fahrzeuge", japanese: "乗り物", russian: "Транспорт" },
-        clothing: { french: "Vêtements", spanish: "Ropa", german: "Kleidung", japanese: "服", russian: "Одежда" },
-        sports: { french: "Sports", spanish: "Deportes", german: "Sport", japanese: "スポーツ", russian: "Спорт" },
-        household: { french: "Objets ménagers", spanish: "Artículos del hogar", german: "Haushaltsgegenstände", japanese: "家庭用品", russian: "Предметы быта" }
-      }
-
-      const translatedName = categoryTranslations[randomCategory]?.[language] || randomCategory
-
-      const challenge: CooperationChallenge = {
-        categoryId: randomCategory,
-        categoryName: translatedName,
-        englishName: randomCategory.charAt(0).toUpperCase() + randomCategory.slice(1),
-        language: language,
-        challengeId: `coop-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
-      }
-
-      setCooperationChallenge(challenge)
-      setIsCooperationWaiting(false)
-      console.log(`✅ [COOPERATION] Challenge created:`, challenge)
-
-    } catch (error) {
-      console.error(`❌ [COOPERATION] Failed to start cooperation mode:`, error)
-      setCooperationError(`Failed to start cooperation mode: ${error.message}`)
-    }
+  // Check if current player can answer in cooperation mode
+  const canAnswerCooperationChallenge = () => {
+    if (!room || !cooperationChallenge || !currentPlayer) return false
+    
+    // Language-based turn system: player can only answer if challenge language matches their language
+    return currentPlayer.language === cooperationChallenge.language
   }
-
-  // Auto-start cooperation mode when game starts
-  useEffect(() => {
-    if (room?.game_state === "playing" && room?.game_mode === "cooperation" && !cooperationChallenge && !isCooperationWaiting) {
-      startCooperationMode()
-    }
-  }, [room?.game_state, room?.game_mode, cooperationChallenge, isCooperationWaiting])
 
   // Loading state
   if (isLoading) {
@@ -818,11 +788,7 @@ export default function RoomPage() {
               className="mobile-btn-sm"
               disabled={isLeavingRoom}
             >
-              {isLeavingRoom ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <LogOut className="h-4 w-4" />
-              )}
+              {isLeavingRoom ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
             </SoundButton>
           </div>
         </div>
@@ -831,22 +797,7 @@ export default function RoomPage() {
         {error && (
           <Card className="mb-6 border-red-200 bg-red-50">
             <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-red-600" />
-                <p className="text-red-700 text-center">{error}</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Cooperation Error Display */}
-        {cooperationError && (
-          <Card className="mb-6 border-orange-200 bg-orange-50">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-orange-600" />
-                <p className="text-orange-700 text-center">{cooperationError}</p>
-              </div>
+              <p className="text-red-700 text-center">{error}</p>
             </CardContent>
           </Card>
         )}
@@ -860,14 +811,17 @@ export default function RoomPage() {
           </Card>
         )}
 
-        {/* Leaderboard - Fixed positioning, hidden in cooperation mode */}
-        {room.game_state === "playing" && room.game_mode !== "cooperation" && (
-          <Leaderboard
-            players={room.players}
-            currentPlayerId={playerId}
-            gameState={room.game_state}
-            targetScore={room.target_score}
-          />
+        {/* Leaderboard for Practice/Competition modes - Repositioned to middle/bottom */}
+        {(room.game_state === "playing" || room.game_state === "finished") && 
+         room.game_mode !== "cooperation" && (
+          <div className="mb-6">
+            <Leaderboard 
+              players={room.players}
+              currentPlayerId={playerId}
+              gameState={room.game_state}
+              targetScore={room.target_score}
+            />
+          </div>
         )}
 
         {/* Game Content */}
@@ -1080,7 +1034,10 @@ export default function RoomPage() {
                   <CardHeader className="mobile-padding">
                     <CardTitle className="mobile-text-lg">Select Your Language</CardTitle>
                     <CardDescription className="mobile-text-base">
-                      Choose the language you want to practice
+                      {room.game_mode === "cooperation" 
+                        ? "Choose your language - you'll only answer questions in this language"
+                        : "Choose the language you want to practice"
+                      }
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="mobile-padding">
@@ -1172,7 +1129,7 @@ export default function RoomPage() {
                         <HandHeart className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
                         <div className="min-w-0">
                           <p className="font-medium text-purple-600 mobile-text-sm">Cooperation Mode</p>
-                          <p className="text-gray-600 mobile-text-sm">2 players work together, type words by category, share 3 lives</p>
+                          <p className="text-gray-600 mobile-text-sm">2 players work together, language-based turns, share 3 lives</p>
                         </div>
                       </div>
                     </div>
@@ -1260,6 +1217,15 @@ export default function RoomPage() {
                       </div>
                       <div className="mobile-text-sm text-gray-600">Lives</div>
                     </div>
+                    {/* Countdown Timer */}
+                    {cooperationChallenge && !isCooperationWaiting && (
+                      <div className="text-center">
+                        <div className={`mobile-text-2xl font-bold ${cooperationCountdown <= 2 ? 'text-red-600' : 'text-blue-600'}`}>
+                          {cooperationCountdown}
+                        </div>
+                        <div className="mobile-text-sm text-gray-600">Time</div>
+                      </div>
+                    )}
                   </div>
                   <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
                     <HandHeart className="h-3 w-3 mr-1" />
@@ -1268,6 +1234,18 @@ export default function RoomPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Cooperation Error Display */}
+            {cooperationError && (
+              <Card className="mobile-card border-red-200 bg-red-50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 text-red-700">
+                    <AlertCircle className="h-4 w-4" />
+                    <p className="text-center">{cooperationError}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Cooperation Challenge */}
             {isCooperationWaiting ? (
@@ -1281,15 +1259,22 @@ export default function RoomPage() {
             ) : cooperationChallenge ? (
               <Card className="mobile-card">
                 <CardHeader className="mobile-padding">
-                  <CardTitle className="mobile-text-lg">
-                    Category: {cooperationChallenge.categoryName}
+                  <CardTitle className="mobile-text-lg flex items-center justify-between">
+                    <span>Category: {cooperationChallenge.categoryName}</span>
+                    {/* Prominent Timer Display */}
+                    <div className={`flex items-center gap-2 px-3 py-1 rounded-full ${
+                      cooperationCountdown <= 2 ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
+                    }`}>
+                      <Timer className="h-4 w-4" />
+                      <span className="font-bold">{cooperationCountdown}s</span>
+                    </div>
                   </CardTitle>
                   <CardDescription className="mobile-text-base">
                     Type a word in <strong>{LANGUAGES.find(l => l.value === cooperationChallenge.language)?.label}</strong> that belongs to this category
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="mobile-spacing-md mobile-padding">
-                  {room.current_challenge_player === playerId ? (
+                  {canAnswerCooperationChallenge() ? (
                     <div className="mobile-spacing-sm">
                       <div className="flex gap-2">
                         <Input
@@ -1311,7 +1296,7 @@ export default function RoomPage() {
                           Submit
                         </SoundButton>
                       </div>
-                      <p className="mobile-text-sm text-gray-600">
+                      <p className="mobile-text-sm text-blue-600">
                         Your turn! Type your answer and press Enter or click Submit.
                       </p>
                     </div>
@@ -1319,7 +1304,10 @@ export default function RoomPage() {
                     <div className="mobile-spacing-sm">
                       <div className="p-4 bg-gray-50 rounded-lg border">
                         <p className="mobile-text-base text-gray-600 text-center">
-                          Waiting for {room.players.find(p => p.id === room.current_challenge_player)?.name} to answer...
+                          Waiting for {LANGUAGES.find(l => l.value === cooperationChallenge.language)?.label} player to answer...
+                        </p>
+                        <p className="mobile-text-sm text-gray-500 text-center mt-2">
+                          This challenge is for {cooperationChallenge.language} language only
                         </p>
                         {cooperationTyping && (
                           <p className="mobile-text-sm text-blue-600 text-center mt-2">

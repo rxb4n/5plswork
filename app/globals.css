@@ -168,12 +168,10 @@
     animation: scoreDecrease 1000ms ease-out;
   }
 
-  /* Leaderboard styles */
+  /* Leaderboard styles - Repositioned to middle/bottom */
   .leaderboard-container {
-    @apply fixed top-4 right-4 z-50;
-    @apply bg-white border border-gray-200 rounded-lg shadow-lg;
-    @apply p-4 min-w-[200px] max-w-[280px];
-    @apply mobile-card;
+    @apply w-full bg-white border border-gray-200 rounded-lg shadow-lg;
+    @apply p-4 mobile-card;
   }
 
   .leaderboard-player {
@@ -203,6 +201,23 @@
 
   .category-loading {
     @apply opacity-50 pointer-events-none;
+  }
+
+  /* Cooperation timer styles */
+  .cooperation-timer {
+    @apply flex items-center justify-center;
+    @apply w-16 h-16 rounded-full border-4;
+    @apply font-bold text-xl;
+    transition: all 0.3s ease-in-out;
+  }
+
+  .cooperation-timer.warning {
+    @apply border-red-500 bg-red-50 text-red-700;
+    animation: pulse 1s infinite;
+  }
+
+  .cooperation-timer.normal {
+    @apply border-blue-500 bg-blue-50 text-blue-700;
   }
 }
 
@@ -279,19 +294,6 @@
   .mobile-padding-lg {
     @apply px-6 py-6;
   }
-
-  /* Responsive leaderboard positioning */
-  @screen sm {
-    .leaderboard-container {
-      @apply top-6 right-6;
-    }
-  }
-
-  @screen lg {
-    .leaderboard-container {
-      @apply top-8 right-8 min-w-[240px];
-    }
-  }
 }
 
 /* Keyframe animations */
@@ -345,6 +347,15 @@
   }
 }
 
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
 /* Mobile-specific media queries */
 @media (max-width: 640px) {
   /* Ensure all text is readable on mobile */
@@ -386,7 +397,6 @@
 
   /* Mobile leaderboard adjustments */
   .leaderboard-container {
-    @apply top-2 right-2 left-2 max-w-none;
     @apply relative mb-4;
     position: relative !important;
   }
