@@ -30,6 +30,7 @@ async function ensureDbInitialized() {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // CRITICAL: Ensure Socket.IO server is only initialized once
   if (!res.socket.server.io) {
     await ensureDbInitialized()
 
@@ -38,61 +39,76 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const io = new SocketIOServer(res.socket.server, {
       path: "/api/socketio",
       addTrailingSlash: false,
+      // CRITICAL: Namespace configuration
+      serveClient: false,
+      // CORS configuration
       cors: {
         origin: process.env.NODE_ENV === "production" 
           ? [
               "https://oneplswork.onrender.com", 
-              "https://*.onrender.com",
-              "wss://oneplswork.onrender.com",
-              "ws://oneplswork.onrender.com"
+              "https://*.onrender.com"
             ]
           : "*",
         methods: ["GET", "POST"],
         credentials: true,
       },
-      // CRITICAL: Force polling first for Render.com compatibility
+      // Transport configuration for Render.com
       transports: ["polling"],
-      allowUpgrades: false, // Disable WebSocket upgrades initially
+      allowUpgrades: false,
       allowEIO3: true,
       pingTimeout: 60000,
       pingInterval: 25000,
       upgradeTimeout: 30000,
       maxHttpBufferSize: 1e6,
       // Additional configuration for cloud platforms
-      serveClient: false,
       cookie: false,
       perMessageDeflate: false,
       httpCompression: false,
     })
 
-    // Enhanced connection error handling
+    // CRITICAL: Enhanced error handling for namespace issues
     io.engine.on("connection_error", (err) => {
-      console.log("❌ Socket.IO connection error details:")
+      console.log("❌ Socket.IO Engine connection error:")
       console.log("  - Request URL:", err.req?.url)
       console.log("  - Request method:", err.req?.method)
-      console.log("  - Request headers:", err.req?.headers)
+      console.log("  - Request headers:", JSON.stringify(err.req?.headers, null, 2))
       console.log("  - Error code:", err.code)
       console.log("  - Error message:", err.message)
       console.log("  - Error context:", err.context)
+      console.log("  - Error type:", err.type)
+      
+      // Log namespace-specific errors
+      if (err.message && err.message.includes("namespace")) {
+        console.log("🚨 NAMESPACE ERROR DETECTED:")
+        console.log("  - This is likely a client-side namespace configuration issue")
+        console.log("  - Check that client is connecting to the correct namespace")
+        console.log("  - Ensure no trailing slashes or incorrect paths")
+      }
     })
 
-    // Log all engine events for debugging
+    // Enhanced connection logging
     io.engine.on("initial_headers", (headers, req) => {
-      console.log("📋 Initial headers:", headers)
+      console.log("📋 Socket.IO Initial headers for:", req.url)
+      console.log("  - User-Agent:", req.headers['user-agent'])
+      console.log("  - Origin:", req.headers.origin)
+      console.log("  - Referer:", req.headers.referer)
     })
 
-    io.engine.on("headers", (headers, req) => {
-      console.log("📋 Response headers:", headers)
+    // Log all incoming connections with detailed info
+    io.engine.on("connection", (socket) => {
+      console.log("🔌 Engine connection established:")
+      console.log("  - Socket ID:", socket.id)
+      console.log("  - Transport:", socket.transport.name)
+      console.log("  - Request URL:", socket.request.url)
+      console.log("  - Request headers:", JSON.stringify(socket.request.headers, null, 2))
     })
 
     // Schedule periodic room cleanup (every 10 minutes)
     setInterval(async () => {
       try {
         await cleanupOldRooms(io)
-        // Also clean up any empty rooms that might have been missed
         const emptyRoomsDeleted = await cleanupEmptyRooms(io)
         if (emptyRoomsDeleted > 0) {
-          // Broadcast available rooms update if any rooms were deleted
           broadcastAvailableRooms(io)
         }
       } catch (error) {
@@ -100,21 +116,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }, 10 * 60 * 1000)
 
+    // CRITICAL: Main connection handler with namespace validation
     io.on("connection", (socket) => {
-      console.log("🔌 New Socket.IO connection:", socket.id, "Transport:", socket.conn.transport.name)
+      console.log("✅ Socket.IO client connected successfully:")
+      console.log("  - Socket ID:", socket.id)
+      console.log("  - Transport:", socket.conn.transport.name)
+      console.log("  - Namespace:", socket.nsp.name)
+      console.log("  - Handshake:", JSON.stringify(socket.handshake, null, 2))
 
-      // Enhanced connection logging
+      // Validate namespace
+      if (socket.nsp.name !== "/") {
+        console.error("❌ Invalid namespace detected:", socket.nsp.name)
+        socket.emit("error", { 
+          message: "Invalid namespace", 
+          namespace: socket.nsp.name,
+          expected: "/",
+          status: 400 
+        })
+        socket.disconnect(true)
+        return
+      }
+
+      // Enhanced connection event logging
       socket.conn.on("upgrade", () => {
-        console.log("⬆️ Socket upgraded to:", socket.conn.transport.name);
-      });
+        console.log("⬆️ Socket upgraded to:", socket.conn.transport.name)
+      })
 
       socket.conn.on("upgradeError", (err) => {
-        console.log("❌ Socket upgrade error:", err);
-      });
+        console.log("❌ Socket upgrade error:", err)
+      })
 
       socket.on("connect_error", (error) => {
-        console.error("❌ Client connection error:", error);
-      });
+        console.error("❌ Client connection error:", error)
+      })
+
+      // Emit connection success event
+      socket.emit("connection-success", { 
+        socketId: socket.id,
+        transport: socket.conn.transport.name,
+        namespace: socket.nsp.name
+      })
 
       socket.on("create-room", async ({ roomId, playerId, data }, callback) => {
         try {
@@ -128,7 +169,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           callback({ room })
           io.to(roomId).emit("room-update", { room })
           
-          // Broadcast available rooms update
           broadcastAvailableRooms(io)
           
           console.log(`✅ Room ${roomId} created successfully`)
@@ -146,7 +186,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Room not found", status: 404 })
           }
           
-          // FEATURE 1: Strict access control - block if game is playing
           if (room.game_state === "playing") {
             console.log(`🚫 Blocked join attempt - Room ${roomId} is currently playing`)
             return callback({ 
@@ -173,7 +212,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
           
-          // Broadcast available rooms update
           broadcastAvailableRooms(io)
           
           console.log(`✅ Player ${playerId} joined room ${roomId}`)
@@ -183,7 +221,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // NEW: Get available rooms handler
       socket.on("get-available-rooms", async ({}, callback) => {
         try {
           console.log("🔍 Fetching available rooms...")
@@ -282,7 +319,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // STRICT: Start game handler - requires ALL players to have languages
       socket.on("start-game", async ({ roomId, playerId }, callback) => {
         try {
           console.log(`🎮 Starting game - Room: ${roomId}, Host: ${playerId}`)
@@ -299,7 +335,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return callback({ error: "Only the room creator can start the game", status: 403 })
           }
           
-          // STRICT REQUIREMENT: ALL players must have a language
           const playersWithoutLanguage = room.players.filter((p) => !p.language)
           if (playersWithoutLanguage.length > 0) {
             console.log(`❌ Players without language: ${playersWithoutLanguage.map(p => p.name).join(", ")}`)
@@ -309,7 +344,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             })
           }
           
-          // STRICT REQUIREMENT: ALL players must be ready
           const playersNotReady = room.players.filter((p) => !p.ready)
           if (playersNotReady.length > 0) {
             console.log(`❌ Players not ready: ${playersNotReady.map(p => p.name).join(", ")}`)
@@ -321,7 +355,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
           console.log(`✅ STRICT checks passed - ALL ${room.players.length} players have languages and are ready`)
 
-          // Update room to playing state
           const roomUpdateSuccess = await updateRoom(roomId, { game_state: "playing", question_count: 0 })
           if (!roomUpdateSuccess) {
             console.log(`❌ Failed to update room state`)
@@ -334,7 +367,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
           
-          // Broadcast available rooms update (room is now playing, so won't appear in available list)
           broadcastAvailableRooms(io)
         } catch (error) {
           console.error(`❌ Error starting game for room ${roomId}:`, error)
@@ -342,7 +374,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // Answer handler - just updates score, no question management
       socket.on("answer", async ({ roomId, playerId, data }, callback) => {
         try {
           console.log(`📝 Processing answer for player ${playerId}`)
@@ -365,20 +396,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           let newScore = player.score
           
           if (isCorrect) {
-            // Correct answer: award points based on speed
             const pointsChange = Math.max(1, Math.round(10 - (10 - timeLeft)))
             newScore = player.score + pointsChange
             console.log(`✅ Correct answer! Player ${playerId} earned ${pointsChange} points`)
           } else {
-            // Wrong answer or timeout: apply -5 penalty
-            newScore = Math.max(0, player.score - 5) // Don't go below 0
+            newScore = Math.max(0, player.score - 5)
             console.log(`❌ Wrong answer/timeout! Player ${playerId} loses 5 points`)
           }
           
-          // Update player score
           await updatePlayer(playerId, { score: newScore })
           
-          // Check if player won
           if (newScore >= room.target_score && newScore > 0) {
             console.log(`🏆 Player ${playerId} reached target score ${room.target_score}`)
             await updateRoom(roomId, { game_state: "finished", winner_id: playerId })
@@ -386,7 +413,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             callback({ room: finalRoom })
             io.to(roomId).emit("room-update", { room: finalRoom })
             
-            // Broadcast available rooms update (game finished, room might be available again)
             broadcastAvailableRooms(io)
             return
           }
@@ -429,7 +455,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
           
-          // Broadcast available rooms update
           broadcastAvailableRooms(io)
           
           console.log(`✅ Game restarted in room ${roomId}`)
@@ -439,12 +464,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // ENHANCED: Leave room handler with automatic cleanup
       socket.on("leave-room", async ({ roomId, playerId }) => {
         try {
           console.log(`🚪 Player ${playerId} leaving room ${roomId}`)
           
-          // Remove player and get cleanup info
           const { roomId: actualRoomId, wasHost, roomDeleted } = await removePlayerFromRoom(playerId, io)
           
           if (!actualRoomId) {
@@ -452,17 +475,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return
           }
           
-          // Remove from socket room
           socket.leave(actualRoomId)
           
           if (roomDeleted) {
             console.log(`🗑️ Room ${actualRoomId} was automatically deleted (empty)`)
-            // Broadcast available rooms update (room is now deleted)
             broadcastAvailableRooms(io)
             return
           }
           
-          // Room still exists with players
           const room = await getRoom(actualRoomId)
           
           if (!room) {
@@ -471,20 +491,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return
           }
           
-          // CRITICAL: If the host left, notify all remaining players to refresh
           if (wasHost) {
             console.log(`🚨 HOST LEFT ROOM ${actualRoomId} - Notifying all remaining players to refresh`)
             io.to(actualRoomId).emit("host-left")
-            // Also send error message as backup
             setTimeout(() => {
               io.to(actualRoomId).emit("error", { message: "Host left the room", status: 404 })
             }, 500)
           } else {
-            // Normal player left - just update room
             io.to(actualRoomId).emit("room-update", { room })
           }
           
-          // Broadcast available rooms update
           broadcastAvailableRooms(io)
           
           console.log(`✅ Player ${playerId} left room ${actualRoomId}`)
@@ -497,16 +513,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       socket.on("disconnect", async (reason) => {
         console.log("🔌 Socket.IO client disconnected:", socket.id, "Reason:", reason)
       })
+
+      // CRITICAL: Handle namespace-related errors
+      socket.on("error", (error) => {
+        console.error("❌ Socket error:", error)
+        if (error.message && error.message.includes("namespace")) {
+          console.log("🚨 Namespace error detected on socket:", socket.id)
+          socket.emit("namespace-error", { 
+            message: "Invalid namespace configuration",
+            socketId: socket.id,
+            namespace: socket.nsp.name
+          })
+        }
+      })
     })
 
     res.socket.server.io = io
-    console.log("✅ Socket.IO server initialized successfully with polling-only transport")
+    console.log("✅ Socket.IO server initialized successfully with namespace validation")
+  } else {
+    console.log("🔄 Socket.IO server already initialized, skipping...")
   }
 
   res.status(200).end()
 }
 
-// NEW: Function to get available rooms
+// Function to get available rooms
 async function getAvailableRooms() {
   try {
     const { Pool } = require("pg")
@@ -519,7 +550,6 @@ async function getAvailableRooms() {
     const client = await pool.connect()
     
     try {
-      // Get rooms that are in lobby state (not playing or finished)
       const roomsResult = await client.query(`
         SELECT r.id, r.target_score, COUNT(p.id) as player_count
         FROM rooms r
@@ -535,7 +565,7 @@ async function getAvailableRooms() {
       const availableRooms = roomsResult.rows.map(row => ({
         id: row.id,
         playerCount: parseInt(row.player_count),
-        maxPlayers: 8, // Set a reasonable max
+        maxPlayers: 8,
         status: "waiting" as const,
         targetScore: row.target_score || 100,
       }))
@@ -551,7 +581,7 @@ async function getAvailableRooms() {
   }
 }
 
-// NEW: Function to broadcast available rooms to all connected clients
+// Function to broadcast available rooms to all connected clients
 async function broadcastAvailableRooms(io: SocketIOServer) {
   try {
     const availableRooms = await getAvailableRooms()

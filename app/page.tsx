@@ -26,30 +26,35 @@ export default function HomePage() {
   const [availableRooms, setAvailableRooms] = useState<AvailableRoom[]>([])
   const [showAudioSettings, setShowAudioSettings] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
+  const [connectionError, setConnectionError] = useState<string | null>(null)
 
   useEffect(() => {
-    // Initialize socket connection with enhanced configuration for Render.com
     console.log("🔌 Initializing Socket.IO connection...")
     
-    const newSocket = io("/api/socketio", {
+    const newSocket = io({
+      // CRITICAL: Correct namespace configuration
       path: "/api/socketio",
       addTrailingSlash: false,
-      // CRITICAL: Use polling only for Render.com compatibility
+      // Force polling for Render.com compatibility
       transports: ["polling"],
-      upgrade: false, // Disable WebSocket upgrades
+      upgrade: false,
       forceNew: true,
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
       timeout: 20000,
-      // Additional options for cloud platforms
       autoConnect: true,
       rememberUpgrade: false,
     })
 
+    // CRITICAL: Enhanced connection success handling
     newSocket.on("connect", () => {
-      console.log("✅ Connected to server, transport:", newSocket.io.engine.transport.name)
+      console.log("✅ Connected to server successfully")
+      console.log("  - Socket ID:", newSocket.id)
+      console.log("  - Transport:", newSocket.io.engine.transport.name)
+      console.log("  - Namespace:", newSocket.nsp.name)
       setConnectionStatus('connected')
+      setConnectionError(null)
       
       // Request available rooms when connected
       newSocket.emit("get-available-rooms", {}, (response: { rooms: AvailableRoom[] }) => {
@@ -59,23 +64,41 @@ export default function HomePage() {
       })
     })
 
+    // CRITICAL: Handle connection success confirmation
+    newSocket.on("connection-success", (data) => {
+      console.log("🎉 Connection success confirmed:", data)
+      setConnectionStatus('connected')
+      setConnectionError(null)
+    })
+
+    // CRITICAL: Handle namespace errors specifically
+    newSocket.on("namespace-error", (error) => {
+      console.error("🚨 Namespace error:", error)
+      setConnectionStatus('error')
+      setConnectionError(`Namespace error: ${error.message}`)
+    })
+
     newSocket.on("connect_error", (error) => {
       console.error("❌ Connection error:", error)
       setConnectionStatus('error')
+      setConnectionError(`Connection failed: ${error.message}`)
     })
 
     newSocket.on("disconnect", (reason) => {
       console.log("🔌 Disconnected from server, reason:", reason)
       setConnectionStatus('connecting')
+      setConnectionError(null)
     })
 
     newSocket.on("reconnect", (attemptNumber) => {
       console.log("🔄 Reconnected after", attemptNumber, "attempts")
       setConnectionStatus('connected')
+      setConnectionError(null)
     })
 
     newSocket.on("reconnect_error", (error) => {
       console.error("❌ Reconnection error:", error)
+      setConnectionError(`Reconnection failed: ${error.message}`)
     })
 
     newSocket.on("available-rooms-update", ({ rooms }: { rooms: AvailableRoom[] }) => {
@@ -83,15 +106,29 @@ export default function HomePage() {
       setAvailableRooms(rooms)
     })
 
-    // Log transport events for debugging
+    // Enhanced error handling
     newSocket.io.on("error", (error) => {
-      console.error("❌ Socket.IO error:", error);
-    });
+      console.error("❌ Socket.IO engine error:", error)
+      setConnectionStatus('error')
+      setConnectionError(`Engine error: ${error.message || error}`)
+    })
 
     newSocket.io.on("reconnect_failed", () => {
-      console.error("❌ Failed to reconnect to server");
+      console.error("❌ Failed to reconnect to server")
       setConnectionStatus('error')
-    });
+      setConnectionError("Failed to reconnect after multiple attempts")
+    })
+
+    // CRITICAL: Handle packet errors (including namespace issues)
+    newSocket.on("error", (error) => {
+      console.error("❌ Socket error:", error)
+      if (error.message && error.message.includes("namespace")) {
+        setConnectionError("Invalid namespace configuration")
+      } else {
+        setConnectionError(`Socket error: ${error.message || error}`)
+      }
+      setConnectionStatus('error')
+    })
 
     setSocket(newSocket)
 
@@ -159,7 +196,7 @@ export default function HomePage() {
             Test your language skills with friends in real-time multiplayer quizzes
           </p>
           
-          {/* Connection Status */}
+          {/* Enhanced Connection Status */}
           <div className="mt-4">
             {connectionStatus === 'connecting' && (
               <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
@@ -172,9 +209,16 @@ export default function HomePage() {
               </Badge>
             )}
             {connectionStatus === 'error' && (
-              <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
-                ❌ Connection failed - Please refresh
-              </Badge>
+              <div className="space-y-2">
+                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                  ❌ Connection failed
+                </Badge>
+                {connectionError && (
+                  <p className="text-sm text-red-600 max-w-md mx-auto">
+                    {connectionError}
+                  </p>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -253,8 +297,15 @@ export default function HomePage() {
                 {connectionStatus !== 'connected' ? (
                   <div className="text-center py-8 text-gray-500">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-lg font-medium mb-2">Connecting to server...</p>
-                    <p className="text-sm">Please wait while we establish connection</p>
+                    <p className="text-lg font-medium mb-2">
+                      {connectionStatus === 'connecting' ? 'Connecting to server...' : 'Connection failed'}
+                    </p>
+                    <p className="text-sm">
+                      {connectionStatus === 'connecting' 
+                        ? 'Please wait while we establish connection' 
+                        : connectionError || 'Please refresh the page to try again'
+                      }
+                    </p>
                   </div>
                 ) : availableRooms.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
@@ -343,7 +394,7 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {/* Connection Troubleshooting */}
+                {/* Enhanced Connection Troubleshooting */}
                 {connectionStatus === 'error' && (
                   <div className="space-y-2 mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
                     <p className="font-medium text-red-700">🔧 Connection Issues?</p>
@@ -352,7 +403,13 @@ export default function HomePage() {
                       <li>• Check your internet connection</li>
                       <li>• Disable ad blockers if any</li>
                       <li>• Try a different browser</li>
+                      <li>• Clear browser cache and cookies</li>
                     </ul>
+                    {connectionError && (
+                      <div className="mt-2 p-2 bg-red-100 rounded text-xs">
+                        <strong>Error details:</strong> {connectionError}
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>

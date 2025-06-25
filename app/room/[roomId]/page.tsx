@@ -83,6 +83,7 @@ export default function RoomPage() {
   const [isAnswering, setIsAnswering] = useState(false)
   const [showAudioSettings, setShowAudioSettings] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
+  const [connectionError, setConnectionError] = useState<string | null>(null)
 
   // Initialize socket and join room
   useEffect(() => {
@@ -94,12 +95,13 @@ export default function RoomPage() {
 
     console.log("🔌 Initializing room Socket.IO connection...")
 
-    const newSocket = io("/api/socketio", {
+    const newSocket = io({
+      // CRITICAL: Correct namespace configuration
       path: "/api/socketio",
       addTrailingSlash: false,
-      // CRITICAL: Use polling only for Render.com compatibility
+      // Force polling for Render.com compatibility
       transports: ["polling"],
-      upgrade: false, // Disable WebSocket upgrades
+      upgrade: false,
       forceNew: true,
       reconnection: true,
       reconnectionAttempts: 5,
@@ -107,9 +109,14 @@ export default function RoomPage() {
       timeout: 20000,
     })
 
+    // CRITICAL: Enhanced connection handling
     newSocket.on("connect", () => {
-      console.log("✅ Connected to server, transport:", newSocket.io.engine.transport.name)
+      console.log("✅ Connected to server successfully")
+      console.log("  - Socket ID:", newSocket.id)
+      console.log("  - Transport:", newSocket.io.engine.transport.name)
+      console.log("  - Namespace:", newSocket.nsp.name)
       setConnectionStatus('connected')
+      setConnectionError(null)
       
       if (isHost) {
         // Create room first, then join
@@ -132,6 +139,22 @@ export default function RoomPage() {
       }
     })
 
+    // CRITICAL: Handle connection success confirmation
+    newSocket.on("connection-success", (data) => {
+      console.log("🎉 Connection success confirmed:", data)
+      setConnectionStatus('connected')
+      setConnectionError(null)
+    })
+
+    // CRITICAL: Handle namespace errors specifically
+    newSocket.on("namespace-error", (error) => {
+      console.error("🚨 Namespace error:", error)
+      setConnectionStatus('error')
+      setConnectionError(`Namespace error: ${error.message}`)
+      setError(`Connection error: ${error.message}`)
+      setIsLoading(false)
+    })
+
     const joinRoom = (socketInstance: Socket) => {
       socketInstance.emit("join-room", {
         roomId,
@@ -151,17 +174,20 @@ export default function RoomPage() {
     newSocket.on("connect_error", (error) => {
       console.error("❌ Connection error:", error)
       setConnectionStatus('error')
+      setConnectionError(`Connection failed: ${error.message}`)
       setError("Failed to connect to server. Please try refreshing the page.")
     })
 
     newSocket.on("disconnect", (reason) => {
       console.log("🔌 Disconnected from server, reason:", reason)
       setConnectionStatus('connecting')
+      setConnectionError(null)
     })
 
     newSocket.on("reconnect", (attemptNumber) => {
       console.log("🔄 Reconnected after", attemptNumber, "attempts")
       setConnectionStatus('connected')
+      setConnectionError(null)
     })
 
     newSocket.on("room-update", ({ room: updatedRoom }: { room: Room }) => {
@@ -184,6 +210,26 @@ export default function RoomPage() {
           router.push("/")
         }, 2000)
       }
+    })
+
+    // Enhanced error handling
+    newSocket.io.on("error", (error) => {
+      console.error("❌ Socket.IO engine error:", error)
+      setConnectionStatus('error')
+      setConnectionError(`Engine error: ${error.message || error}`)
+    })
+
+    // CRITICAL: Handle packet errors (including namespace issues)
+    newSocket.on("error", (error) => {
+      console.error("❌ Socket error:", error)
+      if (error.message && error.message.includes("namespace")) {
+        setConnectionError("Invalid namespace configuration")
+        setError("Connection configuration error")
+      } else {
+        setConnectionError(`Socket error: ${error.message || error}`)
+        setError(`Connection error: ${error.message || error}`)
+      }
+      setConnectionStatus('error')
     })
 
     setSocket(newSocket)
@@ -360,9 +406,18 @@ export default function RoomPage() {
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-lg text-gray-600">Connecting to room...</p>
+          <p className="text-lg text-gray-600">
+            {connectionStatus === 'connecting' ? 'Connecting to room...' : 'Loading room...'}
+          </p>
           {connectionStatus === 'error' && (
-            <p className="text-sm text-red-600 mt-2">Connection failed. Please refresh the page.</p>
+            <div className="mt-4 space-y-2">
+              <p className="text-sm text-red-600">Connection failed. Please refresh the page.</p>
+              {connectionError && (
+                <p className="text-xs text-red-500 max-w-md mx-auto">
+                  {connectionError}
+                </p>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -378,6 +433,12 @@ export default function RoomPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-gray-600">{error}</p>
+            {connectionError && (
+              <div className="p-3 bg-red-50 rounded-lg border border-red-200">
+                <p className="text-sm text-red-700 font-medium">Technical Details:</p>
+                <p className="text-xs text-red-600 mt-1">{connectionError}</p>
+              </div>
+            )}
             <div className="space-y-2">
               <SoundButton onClick={handleLeaveRoom} className="w-full">
                 <Home className="h-4 w-4 mr-2" />
@@ -733,6 +794,11 @@ export default function RoomPage() {
                      '❌ Disconnected'}
                   </Badge>
                 </div>
+                {connectionError && (
+                  <div className="mt-2 p-2 bg-red-50 rounded text-xs">
+                    <strong>Error:</strong> {connectionError}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
