@@ -114,14 +114,14 @@ export default function RoomPage() {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Game state for Practice/Competition modes
+  // Game state
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
   const [selectedAnswer, setSelectedAnswer] = useState<string>("")
   const [timeLeft, setTimeLeft] = useState(10)
   const [isAnswering, setIsAnswering] = useState(false)
   const [questionStartTime, setQuestionStartTime] = useState<number>(0)
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(false)
-  const [showResult, setShowResult] = useState(false)
+  const [showAnswerFeedback, setShowAnswerFeedback] = useState(false)
   const [lastAnswerCorrect, setLastAnswerCorrect] = useState<boolean | null>(null)
 
   // Cooperation mode state
@@ -132,9 +132,9 @@ export default function RoomPage() {
   const [cooperationCountdown, setCooperationCountdown] = useState(5)
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
-  const cooperationTimerRef = useRef<NodeJS.Timeout | null>(null)
   const activityPingRef = useRef<NodeJS.Timeout | null>(null)
   const questionUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const cooperationTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Initialize socket connection
   useEffect(() => {
@@ -230,7 +230,7 @@ export default function RoomPage() {
       console.log("📡 Room updated:", updatedRoom)
       setRoom(updatedRoom)
       
-      // Load question when game starts for Practice/Competition modes with debounce
+      // Load question when game starts for practice/competition modes
       if (updatedRoom.game_state === "playing" && 
           (updatedRoom.game_mode === "practice" || updatedRoom.game_mode === "competition") &&
           !currentQuestion && !isLoadingQuestion) {
@@ -255,7 +255,6 @@ export default function RoomPage() {
       setCooperationTyping(null)
       
       // Start cooperation timer
-      setCooperationCountdown(5)
       startCooperationTimer()
     })
 
@@ -322,35 +321,57 @@ export default function RoomPage() {
       if (timerRef.current) {
         clearInterval(timerRef.current)
       }
-      if (cooperationTimerRef.current) {
-        clearInterval(cooperationTimerRef.current)
-      }
       if (questionUpdateTimeoutRef.current) {
         clearTimeout(questionUpdateTimeoutRef.current)
+      }
+      if (cooperationTimerRef.current) {
+        clearInterval(cooperationTimerRef.current)
       }
       newSocket.close()
     }
   }, [roomId, playerId, playerName, isHost, router])
 
-  // Load question for Practice/Competition modes
-  const loadQuestion = async (roomData: Room) => {
-    if (isLoadingQuestion) return
-    
+  // Handle page unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (socket && playerId) {
+        socket.emit("leave-room", { roomId, playerId })
+      }
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [socket, roomId, playerId])
+
+  // Load question function for practice and competition modes
+  const loadQuestion = async (currentRoom: Room) => {
+    if (isLoadingQuestion) {
+      console.log("⏳ Question already loading, skipping...")
+      return
+    }
+
     setIsLoadingQuestion(true)
     
     try {
-      const language = roomData.game_mode === "practice" 
-        ? currentPlayer?.language 
-        : roomData.host_language
+      let language: string | null = null
       
+      if (currentRoom.game_mode === "practice") {
+        const currentPlayer = currentRoom.players.find(p => p.id === playerId)
+        language = currentPlayer?.language || null
+        console.log(`🎯 Loading question for practice mode in ${language}`)
+      } else if (currentRoom.game_mode === "competition") {
+        language = currentRoom.host_language
+        console.log(`🎯 Loading question for competition mode in ${language}`)
+      }
+
       if (!language) {
         console.error("❌ No language available for question loading")
         setIsLoadingQuestion(false)
         return
       }
 
-      console.log(`🎯 Loading question for ${roomData.game_mode} mode in ${language}`)
-      
       const response = await fetch('/api/get-question', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -369,11 +390,23 @@ export default function RoomPage() {
         setSelectedAnswer("")
         setTimeLeft(10)
         setQuestionStartTime(Date.now())
-        setShowResult(false)
+        setShowAnswerFeedback(false)
         setLastAnswerCorrect(null)
         
         // Start timer
-        startQuestionTimer()
+        if (timerRef.current) {
+          clearInterval(timerRef.current)
+        }
+        
+        timerRef.current = setInterval(() => {
+          setTimeLeft(prev => {
+            if (prev <= 1) {
+              handleAnswerSubmit("", true) // Auto-submit on timeout
+              return 0
+            }
+            return prev - 1
+          })
+        }, 1000)
       } else {
         throw new Error('Invalid question data received')
       }
@@ -385,26 +418,10 @@ export default function RoomPage() {
     }
   }
 
-  // Start question timer for Practice/Competition modes
-  const startQuestionTimer = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current)
-    }
-    
-    timerRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          handleTimeUp()
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
-  }
-
-  // Start cooperation timer with console logging
+  // Cooperation timer functions
   const startCooperationTimer = () => {
     console.log(`Timer started: ${cooperationCountdown}`)
+    setCooperationCountdown(5)
     
     if (cooperationTimerRef.current) {
       clearInterval(cooperationTimerRef.current)
@@ -425,7 +442,6 @@ export default function RoomPage() {
     }, 1000)
   }
 
-  // Stop cooperation timer
   const stopCooperationTimer = () => {
     if (cooperationTimerRef.current) {
       clearInterval(cooperationTimerRef.current)
@@ -433,12 +449,21 @@ export default function RoomPage() {
     }
   }
 
-  // Handle cooperation timeout
   const handleCooperationTimeout = () => {
     if (!socket || !room) return
     
     stopCooperationTimer()
     audio.playFailure()
+    
+    // Immediately reduce life and switch turns
+    const newLives = Math.max(0, (room.cooperation_lives || 3) - 1)
+    console.log(`Lives remaining: ${newLives}`)
+    
+    // Find the other player for turn switching
+    const otherPlayer = room.players.find(p => p.id !== playerId)
+    if (otherPlayer) {
+      console.log(`Turn switched to player: ${otherPlayer.name}`)
+    }
     
     // Emit timeout event to server
     socket.emit("cooperation-timeout", {
@@ -446,93 +471,11 @@ export default function RoomPage() {
       playerId,
       data: { challengeId: cooperationChallenge?.challengeId }
     })
-    
-    console.log(`Lives remaining: ${Math.max(0, (room.cooperation_lives || 3) - 1)}`)
-    
-    // Switch to other player
-    const otherPlayer = room.players.find(p => p.id !== playerId)
-    if (otherPlayer) {
-      console.log(`Turn switched to player: ${otherPlayer.name}`)
-    }
   }
-
-  // Handle page unload
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      if (socket && playerId) {
-        socket.emit("leave-room", { roomId, playerId })
-      }
-    }
-
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload)
-    }
-  }, [socket, roomId, playerId])
 
   // Get current player
   const currentPlayer = room?.players.find(p => p.id === playerId)
   const isCurrentPlayerHost = currentPlayer?.is_host || false
-
-  // Handle answer selection for Practice/Competition modes
-  const handleAnswerSelect = (answer: string) => {
-    if (isAnswering || !currentQuestion || !socket) return
-    
-    setIsAnswering(true)
-    setSelectedAnswer(answer)
-    
-    if (timerRef.current) {
-      clearInterval(timerRef.current)
-    }
-
-    const isCorrect = answer === currentQuestion.correctAnswer
-    setLastAnswerCorrect(isCorrect)
-    setShowResult(true)
-    
-    // Play sound effect
-    if (isCorrect) {
-      audio.playSuccess()
-    } else {
-      audio.playFailure()
-    }
-
-    // Submit answer to server
-    socket.emit("answer", {
-      roomId,
-      playerId,
-      data: {
-        answer,
-        timeLeft,
-        correctAnswer: currentQuestion.correctAnswer,
-        isPracticeMode: room?.game_mode === "practice"
-      }
-    }, (response: any) => {
-      if (response.error) {
-        console.error("❌ Failed to submit answer:", response.error)
-        setError(response.error)
-      }
-    })
-
-    // Show result for 2 seconds, then load next question
-    setTimeout(() => {
-      setShowResult(false)
-      setIsAnswering(false)
-      setCurrentQuestion(null)
-      
-      // Load next question if game is still playing
-      if (room?.game_state === "playing") {
-        setTimeout(() => {
-          loadQuestion(room)
-        }, 500)
-      }
-    }, 2000)
-  }
-
-  // Handle time up for Practice/Competition modes
-  const handleTimeUp = () => {
-    if (isAnswering || !currentQuestion) return
-    handleAnswerSelect("")
-  }
 
   // Handle language selection
   const handleLanguageChange = (language: string) => {
@@ -654,26 +597,71 @@ export default function RoomPage() {
     })
   }
 
-  // Handle leave room with direct navigation
+  // Handle leave room
   const handleLeaveRoom = () => {
-    console.log("🚪 Leaving room and returning to home page")
-    
-    // Emit leave room event if socket is available
     if (socket) {
       socket.emit("leave-room", { roomId, playerId })
     }
-    
-    // Also call API endpoint for cleanup
-    fetch('/api/leave-room', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId, playerId, reason: 'manual_leave' })
-    }).catch(error => {
-      console.error("❌ Error calling leave-room API:", error)
-    })
-    
-    // Navigate directly to home page
+    // Immediately redirect to home page
     window.location.href = 'https://oneplswork.onrender.com/'
+  }
+
+  // Handle answer submission
+  const handleAnswerSubmit = async (answer: string, isTimeout: boolean = false) => {
+    if (isAnswering || !currentQuestion || !socket) return
+    
+    setIsAnswering(true)
+    
+    // Clear timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    
+    const isCorrect = answer === currentQuestion.correctAnswer
+    const currentTimeLeft = isTimeout ? 0 : timeLeft
+    
+    // Show immediate feedback
+    setSelectedAnswer(answer)
+    setShowAnswerFeedback(true)
+    setLastAnswerCorrect(isCorrect)
+    
+    // Play sound
+    if (isCorrect) {
+      audio.playSuccess()
+    } else {
+      audio.playFailure()
+    }
+    
+    try {
+      socket.emit("answer", {
+        roomId,
+        playerId,
+        data: {
+          answer,
+          timeLeft: currentTimeLeft,
+          correctAnswer: currentQuestion.correctAnswer,
+          isPracticeMode: room?.game_mode === "practice"
+        }
+      }, (response: any) => {
+        if (response.error) {
+          console.error("❌ Failed to submit answer:", response.error)
+          setError(response.error)
+        }
+      })
+      
+      // Load next question after delay
+      setTimeout(() => {
+        if (room?.game_state === "playing") {
+          loadQuestion(room)
+        }
+        setIsAnswering(false)
+      }, 2000)
+      
+    } catch (error) {
+      console.error("❌ Error submitting answer:", error)
+      setIsAnswering(false)
+    }
   }
 
   // Handle cooperation answer submission
@@ -698,7 +686,6 @@ export default function RoomPage() {
         // Correct answer
         audio.playSuccess()
         stopCooperationTimer()
-        
         socket?.emit("cooperation-answer", {
           roomId,
           playerId,
@@ -711,8 +698,8 @@ export default function RoomPage() {
         })
       } else {
         // Wrong answer or already used
-        console.log("❌ Cooperation answer result:", result.message)
         audio.playFailure()
+        console.log("❌ Cooperation answer result:", result.message)
         setError(result.message)
         setTimeout(() => setError(null), 3000)
       }
@@ -1183,103 +1170,143 @@ export default function RoomPage() {
           </div>
         )}
 
-        {/* Practice/Competition Mode Gameplay */}
+        {/* Practice & Competition Mode Gameplay */}
         {room.game_state === "playing" && (room.game_mode === "practice" || room.game_mode === "competition") && (
-          <div className="mobile-spacing-md">
-            {/* Question Display */}
-            {isLoadingQuestion ? (
-              <Card className="mobile-card">
-                <CardContent className="flex flex-col items-center justify-center p-8">
-                  <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
-                  <h3 className="mobile-text-lg font-semibold mb-2">Loading Question...</h3>
-                  <p className="text-gray-600 text-center">Please wait while we prepare your next question.</p>
-                </CardContent>
-              </Card>
-            ) : currentQuestion ? (
-              <Card className="mobile-card">
-                <CardHeader className="mobile-padding">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="mobile-text-lg">
-                      Translate: "{currentQuestion.english}"
-                    </CardTitle>
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-gray-500" />
-                      <span className={`font-bold text-lg ${timeLeft <= 3 ? 'text-red-600 animate-pulse' : 'text-blue-600'}`}>
-                        {timeLeft}s
-                      </span>
-                    </div>
+          <div className="space-y-6">
+            {/* Question Section */}
+            <Card className="mobile-card">
+              <CardHeader className="mobile-padding text-center">
+                <CardTitle className="mobile-text-xl">
+                  {room.game_mode === "practice" ? "Practice Mode" : "Competition Mode"}
+                </CardTitle>
+                <CardDescription className="mobile-text-base">
+                  Translate the English word to {
+                    room.game_mode === "practice" 
+                      ? LANGUAGES.find(l => l.value === currentPlayer?.language)?.label
+                      : LANGUAGES.find(l => l.value === room.host_language)?.label
+                  }
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="mobile-padding">
+                {isLoadingQuestion ? (
+                  <div className="text-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
+                    <p className="mobile-text-lg font-medium">Loading question...</p>
                   </div>
-                  <Progress value={(timeLeft / 10) * 100} className="w-full" />
-                </CardHeader>
-                <CardContent className="mobile-spacing-md mobile-padding">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {currentQuestion.options.map((option, index) => (
-                      <SoundButton
-                        key={index}
-                        onClick={() => handleAnswerSelect(option)}
-                        disabled={isAnswering}
-                        className={`
-                          answer-option
-                          ${showResult && option === currentQuestion.correctAnswer ? 'correct' : ''}
-                          ${showResult && option === selectedAnswer && option !== currentQuestion.correctAnswer ? 'incorrect' : ''}
-                          ${!showResult ? 'bg-white hover:bg-gray-50' : ''}
-                          h-16 text-base font-medium
-                          w-[85%] mx-auto
-                        `}
-                        style={{
-                          height: '135%', // Increase height by 35%
-                          width: '85%'    // Decrease width by 15%
-                        }}
-                      >
-                        {option}
-                      </SoundButton>
-                    ))}
-                  </div>
-                  
-                  {showResult && selectedAnswer !== currentQuestion.correctAnswer && (
-                    <div className="correct-answer-display">
-                      Correct answer: {currentQuestion.correctAnswer}
+                ) : currentQuestion ? (
+                  <div className="space-y-6">
+                    {/* Timer */}
+                    <div className="flex items-center justify-center gap-4">
+                      <Clock className="h-5 w-5 text-blue-600" />
+                      <div className="text-center">
+                        <div className={`text-2xl font-bold ${timeLeft <= 3 ? 'text-red-600' : 'text-blue-600'}`}>
+                          {timeLeft}s
+                        </div>
+                        <Progress value={(timeLeft / 10) * 100} className="w-32 mt-2" />
+                      </div>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            ) : (
-              <Card className="mobile-card">
-                <CardContent className="flex flex-col items-center justify-center p-8">
-                  <Timer className="h-12 w-12 text-gray-400 mb-4" />
-                  <h3 className="mobile-text-lg font-semibold mb-2">Waiting for Question</h3>
-                  <p className="text-gray-600 text-center">Your next question will appear here.</p>
-                </CardContent>
-              </Card>
-            )}
 
-            {/* Leaderboard - Positioned in middle/bottom */}
-            <div className="leaderboard-container">
-              <h3 className="mobile-text-lg font-semibold mb-3 flex items-center gap-2">
-                <Trophy className="h-5 w-5 text-yellow-600" />
-                Leaderboard
-              </h3>
-              <div className="mobile-spacing-sm">
-                {room.players
-                  .sort((a, b) => b.score - a.score)
-                  .map((player, index) => (
-                    <div
-                      key={player.id}
-                      className={`leaderboard-player ${player.id === playerId ? 'current-player' : ''}`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-gray-500 w-6">#{index + 1}</span>
-                        {index === 0 && <Trophy className="h-4 w-4 text-yellow-600" />}
-                        <span className="player-name">{player.name}</span>
-                        {player.id === playerId && (
-                          <Badge variant="outline" className="text-xs">You</Badge>
+                    {/* Question */}
+                    <div className="text-center">
+                      <h3 className="mobile-text-2xl font-bold text-gray-900 mb-2">
+                        {currentQuestion.english}
+                      </h3>
+                      <p className="mobile-text-base text-gray-600">
+                        Choose the correct translation
+                      </p>
+                    </div>
+
+                    {/* Answer Options */}
+                    <div className="grid grid-cols-1 gap-3">
+                      {currentQuestion.options.map((option, index) => {
+                        let buttonClass = "answer-option text-black"
+                        
+                        if (showAnswerFeedback) {
+                          if (option === currentQuestion.correctAnswer) {
+                            buttonClass += " correct"
+                          } else if (option === selectedAnswer && option !== currentQuestion.correctAnswer) {
+                            buttonClass += " incorrect"
+                          }
+                        }
+
+                        return (
+                          <SoundButton
+                            key={index}
+                            onClick={() => handleAnswerSubmit(option)}
+                            disabled={isAnswering}
+                            className={buttonClass}
+                            style={{
+                              height: '135%',
+                              width: '85%',
+                              margin: '0 auto',
+                              backgroundColor: showAnswerFeedback ? undefined : 'white'
+                            }}
+                          >
+                            {option}
+                          </SoundButton>
+                        )
+                      })}
+                    </div>
+
+                    {/* Answer Feedback */}
+                    {showAnswerFeedback && (
+                      <div className="correct-answer-display">
+                        {lastAnswerCorrect ? (
+                          <p className="text-green-700 font-medium">
+                            ✅ Correct! "{currentQuestion.correctAnswer}" is the right answer.
+                          </p>
+                        ) : (
+                          <p className="text-red-700 font-medium">
+                            ❌ Incorrect. The correct answer is "{currentQuestion.correctAnswer}".
+                          </p>
                         )}
                       </div>
-                      <span className="player-score">{player.score}</span>
-                    </div>
-                  ))}
-              </div>
-            </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <div className="text-gray-400 text-6xl mb-4">❓</div>
+                    <h3 className="mobile-text-lg font-semibold mb-2">No Question Available</h3>
+                    <p className="text-gray-600 text-center">Waiting for question to load...</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Leaderboard */}
+            <Card className="leaderboard-container">
+              <CardHeader className="mobile-padding">
+                <CardTitle className="flex items-center gap-2 mobile-text-lg">
+                  <Trophy className="h-5 w-5 text-yellow-600" />
+                  Leaderboard
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="mobile-padding">
+                <div className="space-y-2">
+                  {room.players
+                    .sort((a, b) => b.score - a.score)
+                    .map((player, index) => (
+                      <div
+                        key={player.id}
+                        className={`leaderboard-player ${player.id === playerId ? 'current-player' : ''}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            {index === 0 && <Trophy className="h-4 w-4 text-yellow-600" />}
+                            <span className="player-name">{player.name}</span>
+                            {player.id === playerId && (
+                              <Badge variant="outline" className="text-xs">You</Badge>
+                            )}
+                          </div>
+                        </div>
+                        <div className="player-score">
+                          {player.score}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </CardContent>
+            </Card>
           </div>
         )}
 
@@ -1392,34 +1419,38 @@ export default function RoomPage() {
               </Card>
             )}
 
-            {/* Players and Languages Display */}
+            {/* Players & Languages Display */}
             <Card className="mobile-card">
               <CardHeader className="mobile-padding">
                 <CardTitle className="mobile-text-lg">Players & Languages</CardTitle>
               </CardHeader>
               <CardContent className="mobile-padding">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-3">
                   {room.players.map((player) => (
                     <div
                       key={player.id}
                       className={`flex items-center justify-between p-3 border rounded-lg ${
-                        player.id === room.current_challenge_player ? 'bg-blue-50 border-blue-200' : 'bg-gray-50'
+                        room.current_challenge_player === player.id ? 'bg-blue-50 border-blue-200' : ''
                       }`}
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-3">
                         <span className="font-medium mobile-text-base">{player.name}</span>
                         {player.id === playerId && (
                           <Badge variant="outline" className="text-xs">You</Badge>
                         )}
-                        {player.id === room.current_challenge_player && (
+                        {room.current_challenge_player === player.id && (
                           <Badge variant="default" className="text-xs bg-blue-600 text-white">
                             Current Turn
                           </Badge>
                         )}
                       </div>
-                      <Badge variant="outline" className="text-xs">
-                        {LANGUAGES.find(l => l.value === player.language)?.label || 'No Language'}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        {player.language && (
+                          <Badge variant="outline" className="text-xs">
+                            {LANGUAGES.find(l => l.value === player.language)?.label}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
