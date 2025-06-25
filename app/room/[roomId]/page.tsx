@@ -20,11 +20,9 @@ import {
   Settings,
   Volume2,
   RotateCcw,
-  Gamepad2,
-  Target,
   BookOpen,
   Zap,
-  AlertTriangle,
+  Globe,
   RefreshCw
 } from "lucide-react"
 import { io, Socket } from "socket.io-client"
@@ -97,126 +95,6 @@ export default function RoomPage() {
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null)
   const [showFeedback, setShowFeedback] = useState(false)
   const [isCorrectAnswer, setIsCorrectAnswer] = useState(false)
-
-  // Inactivity warning state
-  const [inactivityWarning, setInactivityWarning] = useState<{
-    show: boolean
-    message: string
-    countdown: number
-  }>({ show: false, message: "", countdown: 0 })
-
-  // Game mode transition state
-  const [gameModeTransition, setGameModeTransition] = useState<{
-    show: boolean
-    message: string
-    newMode: string
-  }>({ show: false, message: "", newMode: "" })
-
-  // NEW: Function to handle player removal via API call
-  const removePlayerFromRoom = useCallback(async (roomId: string, playerId: string): Promise<boolean> => {
-    try {
-      console.log(`🚪 Making API call to remove player ${playerId} from room ${roomId}`)
-      
-      // Use fetch with a short timeout for beforeunload scenarios
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 2000) // 2 second timeout
-      
-      const response = await fetch('/api/leave-room', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          roomId,
-          playerId,
-          reason: 'page_unload'
-        }),
-        signal: controller.signal,
-        keepalive: true // Important for beforeunload requests
-      })
-      
-      clearTimeout(timeoutId)
-      
-      if (response.ok) {
-        console.log(`✅ Successfully removed player ${playerId} from room ${roomId}`)
-        return true
-      } else {
-        console.error(`❌ Failed to remove player: ${response.status} ${response.statusText}`)
-        return false
-      }
-    } catch (error) {
-      if (error.name === 'AbortError') {
-        console.warn(`⏰ API call timeout when removing player ${playerId}`)
-      } else {
-        console.error(`❌ Error removing player ${playerId}:`, error)
-      }
-      return false
-    }
-  }, [])
-
-  // NEW: Set up beforeunload event listener
-  useEffect(() => {
-    if (!roomId || !playerId || !room) return
-
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      console.log(`🚨 Page unload detected - attempting to remove player ${playerId} from room ${roomId}`)
-      
-      // Attempt to remove player via API call
-      // Note: This is a best-effort attempt as browsers limit what can be done in beforeunload
-      removePlayerFromRoom(roomId, playerId).catch(error => {
-        console.error('Failed to remove player during page unload:', error)
-      })
-
-      // Also try to emit socket event if still connected
-      if (socket && socket.connected) {
-        try {
-          socket.emit("leave-room", { roomId, playerId })
-          console.log(`📡 Socket leave-room event sent for player ${playerId}`)
-        } catch (error) {
-          console.error('Failed to emit leave-room event:', error)
-        }
-      }
-
-      // Optional: Show confirmation dialog (browsers may ignore this)
-      const message = "Are you sure you want to leave the game room?"
-      event.returnValue = message
-      return message
-    }
-
-    // Add the event listener
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    console.log(`🔒 beforeunload event listener added for player ${playerId} in room ${roomId}`)
-
-    // Cleanup function
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload)
-      console.log(`🔓 beforeunload event listener removed for player ${playerId}`)
-    }
-  }, [roomId, playerId, room, socket, removePlayerFromRoom])
-
-  // NEW: Set up visibility change event listener (additional fallback)
-  useEffect(() => {
-    if (!roomId || !playerId || !room) return
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        console.log(`👁️ Page hidden - sending activity ping for player ${playerId}`)
-        
-        // Send a final activity ping when page becomes hidden
-        if (socket && socket.connected) {
-          socket.emit("room-activity-ping", { roomId, playerId })
-        }
-      }
-    }
-
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    console.log(`👁️ visibilitychange event listener added for player ${playerId}`)
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-      console.log(`👁️ visibilitychange event listener removed for player ${playerId}`)
-    }
-  }, [roomId, playerId, room, socket])
 
   // Initialize socket and join room
   useEffect(() => {
@@ -333,55 +211,6 @@ export default function RoomPage() {
       }
     })
 
-    // Handle inactivity warnings
-    newSocket.on("room-warning", (warning) => {
-      console.log("⚠️ Received room warning:", warning)
-      if (warning.type === "inactivity_warning") {
-        setInactivityWarning({
-          show: true,
-          message: warning.message,
-          countdown: warning.countdown
-        })
-        
-        setTimeout(() => {
-          setInactivityWarning(prev => ({ ...prev, show: false }))
-        }, warning.countdown * 1000)
-      }
-    })
-
-    // Handle room closure
-    newSocket.on("room-closed", (data) => {
-      console.log("🚨 Room closed:", data)
-      setError(`Room closed: ${data.message}`)
-      setTimeout(() => {
-        router.push("/")
-      }, 3000)
-    })
-
-    // Handle forced disconnection
-    newSocket.on("force-disconnect", (data) => {
-      console.log("🚨 Forced disconnect:", data)
-      setError(data.reason)
-      setTimeout(() => {
-        router.push(data.redirectTo || "/")
-      }, 2000)
-    })
-
-    // Handle game mode change notifications
-    newSocket.on("game-mode-changed", (data) => {
-      console.log("🎮 Game mode changed:", data)
-      setGameModeTransition({
-        show: true,
-        message: `Game mode changed to ${data.newMode}`,
-        newMode: data.newMode
-      })
-      
-      // Auto-hide notification after 3 seconds
-      setTimeout(() => {
-        setGameModeTransition(prev => ({ ...prev, show: false }))
-      }, 3000)
-    })
-
     newSocket.io.on("error", (error) => {
       console.error("❌ Socket.IO engine error:", error)
       setConnectionStatus('error')
@@ -404,25 +233,77 @@ export default function RoomPage() {
 
     return () => {
       if (newSocket) {
-        console.log("🧹 Cleaning up socket connection...")
         newSocket.emit("leave-room", { roomId, playerId })
         newSocket.close()
       }
     }
   }, [roomId, playerId, playerName, isHost, router])
 
-  // Send activity pings to keep room alive
+  // Add beforeunload event listener for cleanup
   useEffect(() => {
-    if (!socket || !roomId || !playerId || !room) return
+    if (!roomId || !playerId || !socket) return
 
-    const activityInterval = setInterval(() => {
-      if (socket.connected) {
+    const handleBeforeUnload = async (event: BeforeUnloadEvent) => {
+      console.log("🚪 Page unload detected - cleaning up player from room")
+      
+      try {
+        // Primary cleanup: API call with keepalive
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 2000)
+
+        fetch('/api/leave-room', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            roomId,
+            playerId,
+            reason: 'page_unload'
+          }),
+          keepalive: true, // Ensures request survives page unload
+          signal: controller.signal
+        }).then(() => {
+          clearTimeout(timeoutId)
+          console.log("✅ Player removed via API call")
+        }).catch((error) => {
+          clearTimeout(timeoutId)
+          console.warn("⚠️ API cleanup failed:", error.message)
+        })
+
+        // Secondary cleanup: Socket event (if still connected)
+        if (socket && socket.connected) {
+          socket.emit("leave-room", { roomId, playerId })
+          console.log("✅ Leave room event sent via socket")
+        }
+
+      } catch (error) {
+        console.error("❌ Error during beforeunload cleanup:", error)
+      }
+
+      // Don't prevent page unload
+      return undefined
+    }
+
+    // Add beforeunload listener
+    window.addEventListener('beforeunload', handleBeforeUnload)
+
+    // Add visibilitychange listener for additional cleanup
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && socket && socket.connected) {
+        // Send activity ping when page becomes hidden
         socket.emit("room-activity-ping", { roomId, playerId })
       }
-    }, 30000)
+    }
 
-    return () => clearInterval(activityInterval)
-  }, [socket, roomId, playerId, room])
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    // Cleanup listeners on unmount
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [roomId, playerId, socket])
 
   // Update current player when room changes
   useEffect(() => {
@@ -463,17 +344,11 @@ export default function RoomPage() {
 
   // Auto-fetch question when game state changes to playing
   useEffect(() => {
-    if (room?.game_state === "playing" && !currentQuestion) {
-      const languageToUse = room.game_mode === "competition" 
-        ? room.host_language 
-        : currentPlayer?.language
-      
-      if (languageToUse) {
-        console.log("Game started, fetching initial question...")
-        fetchNewQuestion(languageToUse)
-      }
+    if (room?.game_state === "playing" && currentPlayer?.language && !currentQuestion) {
+      console.log("Game started, fetching initial question...")
+      fetchNewQuestion(currentPlayer.language)
     }
-  }, [room?.game_state, room?.game_mode, room?.host_language, currentPlayer?.language, currentQuestion, fetchNewQuestion])
+  }, [room?.game_state, currentPlayer?.language, currentQuestion, fetchNewQuestion])
 
   // Timer countdown
   useEffect(() => {
@@ -487,26 +362,13 @@ export default function RoomPage() {
     }
   }, [timeLeft, currentQuestion, isAnswering, room?.game_state, showFeedback])
 
-  // Countdown for inactivity warning
-  useEffect(() => {
-    if (inactivityWarning.show && inactivityWarning.countdown > 0) {
-      const timer = setTimeout(() => {
-        setInactivityWarning(prev => ({
-          ...prev,
-          countdown: prev.countdown - 1
-        }))
-      }, 1000)
-      return () => clearTimeout(timer)
-    }
-  }, [inactivityWarning.show, inactivityWarning.countdown])
-
-  const handleGameModeSelect = (mode: "practice" | "competition") => {
+  const handleGameModeSelect = (gameMode: "practice" | "competition") => {
     if (!socket || !currentPlayer?.is_host) return
 
     socket.emit("update-game-mode", {
       roomId,
       playerId,
-      data: { gameMode: mode }
+      data: { gameMode }
     }, (response: any) => {
       if (response.error) {
         setError(response.error)
@@ -514,28 +376,12 @@ export default function RoomPage() {
     })
   }
 
-  // Handle game mode change (reset and switch)
   const handleChangeGameMode = () => {
     if (!socket || !currentPlayer?.is_host) return
 
-    // Reset the room to allow mode selection
-    socket.emit("change-game-mode", {
-      roomId,
-      playerId
-    }, (response: any) => {
+    socket.emit("change-game-mode", { roomId, playerId }, (response: any) => {
       if (response.error) {
         setError(response.error)
-      } else {
-        // Show transition notification
-        setGameModeTransition({
-          show: true,
-          message: "Game mode reset - please select a new mode",
-          newMode: "selection"
-        })
-        
-        setTimeout(() => {
-          setGameModeTransition(prev => ({ ...prev, show: false }))
-        }, 3000)
       }
     })
   }
@@ -569,23 +415,7 @@ export default function RoomPage() {
   }
 
   const handleToggleReady = () => {
-    if (!socket || !room) return
-
-    // Check readiness requirements based on game mode
-    if (room.game_mode === "competition") {
-      if (!room.host_language) {
-        setError("Host must select a language first")
-        return
-      }
-    } else if (room.game_mode === "practice") {
-      if (!currentPlayer?.language) {
-        setError("Select a language first")
-        return
-      }
-    } else {
-      setError("Game mode must be selected first")
-      return
-    }
+    if (!socket) return
 
     socket.emit("toggle-ready", { roomId, playerId }, (response: any) => {
       if (response.error) {
@@ -637,19 +467,17 @@ export default function RoomPage() {
 
     setShowFeedback(true)
 
-    // Calculate points based on game mode
     const isPracticeMode = room?.game_mode === "practice"
-    const pointsData = {
-      answer,
-      timeLeft,
-      correctAnswer: currentQuestion.correctAnswer,
-      isPracticeMode
-    }
 
     socket.emit("answer", {
       roomId,
       playerId,
-      data: pointsData
+      data: {
+        answer,
+        timeLeft,
+        correctAnswer: currentQuestion.correctAnswer,
+        isPracticeMode
+      }
     }, (response: any) => {
       if (response.error) {
         setError(response.error)
@@ -661,12 +489,8 @@ export default function RoomPage() {
           setIsAnswering(false)
           setSelectedAnswer(null)
           
-          const languageToUse = room?.game_mode === "competition" 
-            ? room.host_language 
-            : currentPlayer?.language
-          
-          if (languageToUse && room?.game_state === "playing") {
-            fetchNewQuestion(languageToUse)
+          if (currentPlayer?.language && room?.game_state === "playing") {
+            fetchNewQuestion(currentPlayer.language)
           }
         }, 2000)
       }
@@ -721,17 +545,17 @@ export default function RoomPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="text-center">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center mobile-no-scroll">
+        <div className="text-center mobile-padding">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-lg text-gray-600">
+          <p className="mobile-text-lg text-gray-600">
             {connectionStatus === 'connecting' ? 'Connecting to room...' : 'Loading room...'}
           </p>
           {connectionStatus === 'error' && (
-            <div className="mt-4 space-y-2">
-              <p className="text-sm text-red-600">Connection failed. Please refresh the page.</p>
+            <div className="mt-4 mobile-spacing-sm">
+              <p className="mobile-text-sm text-red-600">Connection failed. Please refresh the page.</p>
               {connectionError && (
-                <p className="text-xs text-red-500 max-w-md mx-auto">
+                <p className="mobile-text-sm text-red-500 max-w-md mx-auto">
                   {connectionError}
                 </p>
               )}
@@ -744,28 +568,28 @@ export default function RoomPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-red-50 to-pink-100 flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle className="text-red-600">Connection Error</CardTitle>
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-pink-100 flex items-center justify-center mobile-no-scroll">
+        <Card className="w-full max-w-md mobile-container">
+          <CardHeader className="mobile-padding">
+            <CardTitle className="text-red-600 mobile-text-xl">Connection Error</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-gray-600">{error}</p>
+          <CardContent className="mobile-spacing-md mobile-padding">
+            <p className="text-gray-600 mobile-text-base">{error}</p>
             {connectionError && (
               <div className="p-3 bg-red-50 rounded-lg border border-red-200">
-                <p className="text-sm text-red-700 font-medium">Technical Details:</p>
-                <p className="text-xs text-red-600 mt-1">{connectionError}</p>
+                <p className="mobile-text-sm text-red-700 font-medium">Technical Details:</p>
+                <p className="mobile-text-sm text-red-600 mt-1">{connectionError}</p>
               </div>
             )}
-            <div className="space-y-2">
-              <SoundButton onClick={handleLeaveRoom} className="w-full">
+            <div className="mobile-spacing-sm">
+              <SoundButton onClick={handleLeaveRoom} className="mobile-btn-md w-full">
                 <Home className="h-4 w-4 mr-2" />
                 Return Home
               </SoundButton>
               <SoundButton 
                 onClick={() => window.location.reload()} 
                 variant="outline" 
-                className="w-full"
+                className="mobile-btn-md w-full"
               >
                 🔄 Refresh Page
               </SoundButton>
@@ -778,14 +602,14 @@ export default function RoomPage() {
 
   if (!room || !currentPlayer) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-red-50 to-pink-100 flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle className="text-red-600">Room Not Found</CardTitle>
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-pink-100 flex items-center justify-center mobile-no-scroll">
+        <Card className="w-full max-w-md mobile-container">
+          <CardHeader className="mobile-padding">
+            <CardTitle className="text-red-600 mobile-text-xl">Room Not Found</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-gray-600">The room you're looking for doesn't exist or has been closed.</p>
-            <SoundButton onClick={handleLeaveRoom} className="w-full">
+          <CardContent className="mobile-spacing-md mobile-padding">
+            <p className="text-gray-600 mobile-text-base">The room you're looking for doesn't exist or has been closed.</p>
+            <SoundButton onClick={handleLeaveRoom} className="mobile-btn-md w-full">
               <Home className="h-4 w-4 mr-2" />
               Return Home
             </SoundButton>
@@ -796,225 +620,177 @@ export default function RoomPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      {/* Inactivity Warning Banner */}
-      {inactivityWarning.show && (
-        <div className="fixed top-0 left-0 right-0 z-50 bg-yellow-500 text-white p-4 text-center">
-          <div className="flex items-center justify-center gap-2">
-            <AlertTriangle className="h-5 w-5" />
-            <span className="font-medium">{inactivityWarning.message}</span>
-            <span className="font-bold">({inactivityWarning.countdown}s)</span>
-          </div>
-        </div>
-      )}
-
-      {/* Game Mode Transition Banner */}
-      {gameModeTransition.show && (
-        <div className="fixed top-0 left-0 right-0 z-50 bg-blue-500 text-white p-4 text-center">
-          <div className="flex items-center justify-center gap-2">
-            <RefreshCw className="h-5 w-5 animate-spin" />
-            <span className="font-medium">{gameModeTransition.message}</span>
-          </div>
-        </div>
-      )}
-
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              Room: <span className="font-mono text-blue-600">{roomId}</span>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 mobile-no-scroll">
+      <div className="mobile-container mobile-padding">
+        {/* Header - Mobile Optimized */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-6 gap-4">
+          <div className="min-w-0">
+            <h1 className="mobile-text-xl sm:text-2xl font-bold text-gray-900 break-all">
+              <span className="hidden sm:inline">Room: </span>
+              <span className="font-mono text-blue-600">{roomId}</span>
             </h1>
-            <div className="flex items-center gap-2">
-              <p className="text-gray-600">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <p className="text-gray-600 mobile-text-sm">
                 {room.game_state === "lobby" && "Waiting for players..."}
                 {room.game_state === "playing" && "Game in progress"}
                 {room.game_state === "finished" && "Game finished!"}
               </p>
-              {room.game_mode && (
-                <Badge variant="outline" className="text-xs">
-                  {room.game_mode === "practice" ? (
-                    <>
-                      <BookOpen className="h-3 w-3 mr-1" />
-                      Practice Mode
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="h-3 w-3 mr-1" />
-                      Competition Mode
-                    </>
-                  )}
-                </Badge>
-              )}
               {connectionStatus === 'connecting' && (
-                <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
+                <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 mobile-text-sm w-fit">
                   🔄 Reconnecting...
                 </Badge>
               )}
               {connectionStatus === 'error' && (
-                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 mobile-text-sm w-fit">
                   ❌ Connection lost
                 </Badge>
               )}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* Change Game Mode Button (Host Only, Lobby State) */}
-            {room.game_state === "lobby" && currentPlayer.is_host && room.game_mode && (
-              <SoundButton
-                onClick={handleChangeGameMode}
-                variant="outline"
-                size="sm"
-                className="bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100"
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Change Mode
-              </SoundButton>
-            )}
             <SoundButton
               onClick={() => setShowAudioSettings(!showAudioSettings)}
               variant="outline"
-              size="sm"
+              className="mobile-btn-sm"
             >
               <Volume2 className="h-4 w-4" />
             </SoundButton>
-            <SoundButton onClick={handleLeaveRoom} variant="outline">
+            <SoundButton onClick={handleLeaveRoom} variant="outline" className="mobile-btn-sm">
               <Home className="h-4 w-4 mr-2" />
-              Leave Room
+              <span className="hidden sm:inline">Leave Room</span>
+              <span className="sm:hidden">Leave</span>
             </SoundButton>
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Main Game Area */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Game Mode Selection (Host Only, Lobby State) */}
-            {room.game_state === "lobby" && currentPlayer.is_host && !room.game_mode && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Gamepad2 className="h-5 w-5" />
-                    Game Mode Selection
-                  </CardTitle>
-                  <CardDescription>
-                    Choose how players will compete in this quiz room
+        <div className="mobile-grid-stack lg:grid-cols-3 lg:gap-6">
+          {/* Main Game Area - Mobile Optimized */}
+          <div className="lg:col-span-2 mobile-spacing-md">
+            {/* Game Mode Selection */}
+            {room.game_state === "lobby" && !room.game_mode && currentPlayer.is_host && (
+              <Card className="mobile-card">
+                <CardHeader className="mobile-padding">
+                  <CardTitle className="mobile-text-xl">Choose Game Mode</CardTitle>
+                  <CardDescription className="mobile-text-base">
+                    Select how you want to play
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="grid gap-4">
+                <CardContent className="mobile-spacing-md mobile-padding">
+                  <div className="mobile-grid-2col">
                     <SoundButton
                       onClick={() => handleGameModeSelect("practice")}
+                      className="mobile-btn-lg h-auto py-6 flex-col gap-2"
                       variant="outline"
-                      className="w-full p-6 h-auto flex-col items-start text-left"
                     >
-                      <div className="flex items-center gap-3 mb-2">
-                        <BookOpen className="h-5 w-5 text-blue-600" />
-                        <span className="text-lg font-semibold">Practice Mode</span>
+                      <BookOpen className="h-6 w-6 text-blue-600" />
+                      <div className="text-center">
+                        <div className="font-semibold mobile-text-base">Practice Mode</div>
+                        <div className="mobile-text-sm text-gray-600">Individual languages</div>
                       </div>
-                      <ul className="text-sm text-gray-600 space-y-1">
-                        <li>• Players individually select their preferred language</li>
-                        <li>• No point penalties for incorrect answers or timeouts</li>
-                        <li>• Focus on learning and improvement</li>
-                        <li>• Relaxed, educational gameplay</li>
-                      </ul>
                     </SoundButton>
-
+                    
                     <SoundButton
                       onClick={() => handleGameModeSelect("competition")}
+                      className="mobile-btn-lg h-auto py-6 flex-col gap-2"
                       variant="outline"
-                      className="w-full p-6 h-auto flex-col items-start text-left"
                     >
-                      <div className="flex items-center gap-3 mb-2">
-                        <Zap className="h-5 w-5 text-orange-600" />
-                        <span className="text-lg font-semibold">Competition Mode</span>
+                      <Zap className="h-6 w-6 text-orange-600" />
+                      <div className="text-center">
+                        <div className="font-semibold mobile-text-base">Competition</div>
+                        <div className="mobile-text-sm text-gray-600">Same language</div>
                       </div>
-                      <ul className="text-sm text-gray-600 space-y-1">
-                        <li>• All players use the host's selected language</li>
-                        <li>• Point penalties apply for incorrect answers (-5 points)</li>
-                        <li>• Competitive scoring system</li>
-                        <li>• Race to reach the target score first</li>
-                      </ul>
                     </SoundButton>
                   </div>
                 </CardContent>
               </Card>
             )}
 
-            {/* Competition Mode Language Selection (Host Only) */}
-            {room.game_state === "lobby" && currentPlayer.is_host && room.game_mode === "competition" && !room.host_language && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Target className="h-5 w-5" />
-                    Competition Language Selection
-                  </CardTitle>
-                  <CardDescription>
-                    Choose the language all players will compete in
+            {/* Competition Language Selection */}
+            {room.game_state === "lobby" && room.game_mode === "competition" && currentPlayer.is_host && !room.host_language && (
+              <Card className="mobile-card">
+                <CardHeader className="mobile-padding">
+                  <CardTitle className="mobile-text-xl">Select Competition Language</CardTitle>
+                  <CardDescription className="mobile-text-base">
+                    All players will compete in this language
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Competition Language</label>
-                    <Select onValueChange={handleHostLanguageChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select the competition language" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LANGUAGES.map((lang) => (
-                          <SelectItem key={lang.value} value={lang.value}>
-                            {lang.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="p-3 bg-orange-50 rounded-lg border border-orange-200">
-                    <p className="text-sm text-orange-700">
-                      <strong>Competition Mode:</strong> All players will answer questions in {room.host_language ? LANGUAGES.find(l => l.value === room.host_language)?.label : "the selected language"}. Wrong answers will result in -5 point penalties.
-                    </p>
-                  </div>
+                <CardContent className="mobile-spacing-md mobile-padding">
+                  <Select onValueChange={handleHostLanguageChange}>
+                    <SelectTrigger className="mobile-input">
+                      <SelectValue placeholder="Choose the competition language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LANGUAGES.map((lang) => (
+                        <SelectItem key={lang.value} value={lang.value} className="mobile-text-base">
+                          {lang.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </CardContent>
               </Card>
             )}
 
-            {/* Game Setup (After Mode Selection) */}
+            {/* Game Setup */}
             {room.game_state === "lobby" && room.game_mode && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    <span>Game Setup</span>
-                    {/* Change Mode Button in Header */}
+              <Card className="mobile-card">
+                <CardHeader className="mobile-padding">
+                  <CardTitle className="flex items-center gap-2 mobile-text-xl">
+                    {room.game_mode === "practice" ? (
+                      <>
+                        <BookOpen className="h-5 w-5 text-blue-600" />
+                        Practice Mode
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="h-5 w-5 text-orange-600" />
+                        Competition Mode
+                      </>
+                    )}
                     {currentPlayer.is_host && (
                       <SoundButton
                         onClick={handleChangeGameMode}
                         variant="outline"
-                        size="sm"
-                        className="bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100"
+                        className="mobile-btn-sm ml-auto"
                       >
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                        Change Mode
+                        <RefreshCw className="h-4 w-4 mr-1" />
+                        <span className="hidden sm:inline">Change Mode</span>
+                        <span className="sm:hidden">Change</span>
                       </SoundButton>
                     )}
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className="mobile-text-base">
                     Configure your settings and wait for all players to be ready
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* Practice Mode: Individual Language Selection */}
+                <CardContent className="mobile-spacing-md mobile-padding">
+                  {/* Competition Language Display */}
+                  {room.game_mode === "competition" && room.host_language && (
+                    <div className="p-4 bg-orange-50 rounded-lg border border-orange-200 mb-4">
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-5 w-5 text-orange-600" />
+                        <span className="font-medium mobile-text-base">Competition Language:</span>
+                        <Badge variant="outline" className="bg-orange-100 text-orange-700 mobile-text-sm">
+                          {LANGUAGES.find(l => l.value === room.host_language)?.label}
+                        </Badge>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Language Selection (Practice Mode Only) */}
                   {room.game_mode === "practice" && (
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Choose Your Language</label>
+                    <div className="mobile-spacing-sm">
+                      <label className="mobile-text-base font-medium">Choose Your Language</label>
                       <Select
                         value={currentPlayer.language || ""}
                         onValueChange={handleLanguageChange}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className="mobile-input">
                           <SelectValue placeholder="Select a language to learn" />
                         </SelectTrigger>
                         <SelectContent>
                           {LANGUAGES.map((lang) => (
-                            <SelectItem key={lang.value} value={lang.value}>
+                            <SelectItem key={lang.value} value={lang.value} className="mobile-text-base">
                               {lang.label}
                             </SelectItem>
                           ))}
@@ -1023,36 +799,20 @@ export default function RoomPage() {
                     </div>
                   )}
 
-                  {/* Competition Mode: Show Selected Language */}
-                  {room.game_mode === "competition" && room.host_language && (
-                    <div className="p-4 bg-orange-50 rounded-lg border border-orange-200">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Target className="h-4 w-4 text-orange-600" />
-                        <span className="font-medium text-orange-800">Competition Language</span>
-                      </div>
-                      <p className="text-orange-700">
-                        All players will compete in: <strong>{LANGUAGES.find(l => l.value === room.host_language)?.label}</strong>
-                      </p>
-                      <p className="text-sm text-orange-600 mt-1">
-                        Wrong answers will result in -5 point penalties
-                      </p>
-                    </div>
-                  )}
-
                   {/* Target Score (Host Only) */}
                   {currentPlayer.is_host && (
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Target Score</label>
+                    <div className="mobile-spacing-sm">
+                      <label className="mobile-text-base font-medium">Target Score</label>
                       <Select
                         value={room.target_score.toString()}
                         onValueChange={handleTargetScoreChange}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className="mobile-input">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           {TARGET_SCORES.map((score) => (
-                            <SelectItem key={score} value={score.toString()}>
+                            <SelectItem key={score} value={score.toString()} className="mobile-text-base">
                               {score} points
                             </SelectItem>
                           ))}
@@ -1062,16 +822,16 @@ export default function RoomPage() {
                   )}
 
                   {/* Ready Button */}
-                  <div className="flex items-center gap-4">
+                  <div className="mobile-flex-stack sm:flex-row sm:items-center gap-4">
                     <SoundButton
                       onClick={handleToggleReady}
                       disabled={
-                        connectionStatus !== 'connected' ||
                         (room.game_mode === "practice" && !currentPlayer.language) ||
-                        (room.game_mode === "competition" && !room.host_language)
+                        (room.game_mode === "competition" && !room.host_language) ||
+                        connectionStatus !== 'connected'
                       }
                       variant={currentPlayer.ready ? "default" : "outline"}
-                      className="flex-1"
+                      className="mobile-btn-lg flex-1"
                     >
                       <CheckCircle className="h-4 w-4 mr-2" />
                       {currentPlayer.ready ? "Ready!" : "Mark as Ready"}
@@ -1081,13 +841,12 @@ export default function RoomPage() {
                       <SoundButton
                         onClick={handleStartGame}
                         disabled={
-                          connectionStatus !== 'connected' ||
                           !room.players.every(p => p.ready) ||
                           (room.game_mode === "practice" && !room.players.every(p => p.language)) ||
-                          (room.game_mode === "competition" && !room.host_language)
+                          (room.game_mode === "competition" && !room.host_language) ||
+                          connectionStatus !== 'connected'
                         }
-                        size="lg"
-                        className="flex-1"
+                        className="mobile-btn-lg flex-1"
                       >
                         Start Game
                       </SoundButton>
@@ -1095,12 +854,9 @@ export default function RoomPage() {
                   </div>
 
                   {/* Requirements Check */}
-                  <div className="text-sm text-gray-600 space-y-1">
-                    <p className="font-medium">Requirements to start:</p>
-                    <ul className="space-y-1 ml-4">
-                      <li className={room.game_mode ? "text-green-600" : "text-red-600"}>
-                        • Game mode must be selected
-                      </li>
+                  <div className="mobile-text-sm text-gray-600 mobile-spacing-sm">
+                    <p className="font-medium mobile-text-base">Requirements to start:</p>
+                    <ul className="mobile-spacing-sm ml-4">
                       {room.game_mode === "practice" && (
                         <li className={room.players.every(p => p.language) ? "text-green-600" : "text-red-600"}>
                           • All players must select a language
@@ -1122,50 +878,44 @@ export default function RoomPage() {
 
             {/* Game State: Playing */}
             {room.game_state === "playing" && currentQuestion && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    <span>Translate this word:</span>
+              <Card className="mobile-card">
+                <CardHeader className="mobile-padding">
+                  <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <span className="mobile-text-xl">Translate this word:</span>
                     <div className="flex items-center gap-2">
                       <Clock className="h-4 w-4" />
-                      <span className={`font-mono ${timeLeft <= 3 ? "text-red-600" : ""}`}>
+                      <span className={`font-mono mobile-text-lg ${timeLeft <= 3 ? "text-red-600" : ""}`}>
                         {timeLeft}s
                       </span>
                     </div>
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-6">
+                <CardContent className="mobile-spacing-md mobile-padding">
                   {/* Question */}
                   <div className="text-center">
-                    <p className="text-3xl font-bold text-blue-600 mb-2">
+                    <p className="mobile-text-3xl sm:text-3xl font-bold text-blue-600 mb-2 break-words">
                       {currentQuestion.english}
                     </p>
-                    <p className="text-gray-600">
-                      Translate to {
-                        room.game_mode === "competition" 
-                          ? LANGUAGES.find(l => l.value === room.host_language)?.label
-                          : LANGUAGES.find(l => l.value === currentPlayer.language)?.label
-                      }
+                    <p className="text-gray-600 mobile-text-base">
+                      Translate to{" "}
+                      {room.game_mode === "competition" && room.host_language
+                        ? LANGUAGES.find(l => l.value === room.host_language)?.label
+                        : LANGUAGES.find(l => l.value === currentPlayer.language)?.label}
                     </p>
-                    {room.game_mode === "practice" && (
-                      <p className="text-sm text-green-600 mt-1">
-                        Practice Mode: No penalties for wrong answers
-                      </p>
-                    )}
                   </div>
 
                   {/* Timer Progress */}
                   <Progress value={(timeLeft / 10) * 100} className="h-2" />
 
-                  {/* Answer Options with Enhanced Visual Feedback */}
-                  <div className="grid grid-cols-2 gap-3">
+                  {/* Answer Options - Mobile Optimized */}
+                  <div className="mobile-grid-2col">
                     {currentQuestion.options.map((option, index) => (
                       <Button
                         key={index}
                         onClick={() => handleAnswer(option)}
                         disabled={isAnswering || timeLeft === 0 || connectionStatus !== 'connected' || showFeedback}
                         variant={getAnswerButtonStyle(option)}
-                        className={`h-16 text-lg transition-all duration-300 ${getAnswerButtonClasses(option)}`}
+                        className={`mobile-btn-lg mobile-text-lg transition-all duration-300 ${getAnswerButtonClasses(option)}`}
                       >
                         {option}
                       </Button>
@@ -1175,17 +925,17 @@ export default function RoomPage() {
                   {/* Feedback Display */}
                   {showFeedback && (
                     <div className="text-center">
-                      {isCorrectAnswer ? (
+                      {isCorreectAnswer ? (
                         <div className="flex items-center justify-center gap-2 text-green-600">
                           <CheckCircle className="h-6 w-6" />
-                          <span className="text-xl font-bold">Correct! 🎉</span>
+                          <span className="mobile-text-xl font-bold">Correct! 🎉</span>
                         </div>
                       ) : (
-                        <div className="space-y-2">
+                        <div className="mobile-spacing-sm">
                           <div className="flex items-center justify-center gap-2 text-red-600">
-                            <span className="text-xl font-bold">❌ Incorrect</span>
+                            <span className="mobile-text-xl font-bold">❌ Incorrect</span>
                           </div>
-                          <p className="text-gray-600">
+                          <p className="text-gray-600 mobile-text-base">
                             Correct answer: <span className="font-bold text-green-600">{currentQuestion.correctAnswer}</span>
                           </p>
                         </div>
@@ -1196,7 +946,7 @@ export default function RoomPage() {
                   {isAnswering && !showFeedback && (
                     <div className="text-center text-gray-600">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                      Processing answer...
+                      <span className="mobile-text-base">Processing answer...</span>
                     </div>
                   )}
                 </CardContent>
@@ -1205,20 +955,20 @@ export default function RoomPage() {
 
             {/* Game State: Finished */}
             {room.game_state === "finished" && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
+              <Card className="mobile-card">
+                <CardHeader className="mobile-padding">
+                  <CardTitle className="flex items-center gap-2 mobile-text-xl">
                     <Trophy className="h-6 w-6 text-yellow-500" />
                     Game Finished!
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="mobile-spacing-md mobile-padding">
                   {room.winner_id && (
                     <div className="text-center">
-                      <p className="text-xl font-bold text-green-600 mb-2">
+                      <p className="mobile-text-xl font-bold text-green-600 mb-2">
                         🎉 {room.players.find(p => p.id === room.winner_id)?.name} Wins!
                       </p>
-                      <p className="text-gray-600">
+                      <p className="text-gray-600 mobile-text-base">
                         Reached {room.target_score} points first
                       </p>
                     </div>
@@ -1227,8 +977,7 @@ export default function RoomPage() {
                   {currentPlayer.is_host && (
                     <SoundButton 
                       onClick={handleRestart} 
-                      className="w-full" 
-                      size="lg"
+                      className="mobile-btn-lg w-full"
                       disabled={connectionStatus !== 'connected'}
                     >
                       <RotateCcw className="h-4 w-4 mr-2" />
@@ -1240,56 +989,49 @@ export default function RoomPage() {
             )}
           </div>
 
-          {/* Sidebar */}
-          <div className="space-y-6">
+          {/* Sidebar - Mobile Optimized */}
+          <div className="mobile-spacing-md">
             {/* Audio Settings */}
             {showAudioSettings && <AudioSettings />}
 
             {/* Players List */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+            <Card className="mobile-card">
+              <CardHeader className="mobile-padding">
+                <CardTitle className="flex items-center gap-2 mobile-text-lg">
                   <Users className="h-5 w-5" />
                   Players ({room.players.length})
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="mobile-spacing-sm mobile-padding">
                 {room.players.map((player) => (
                   <div
                     key={player.id}
-                    className="flex items-center justify-between p-3 border rounded-lg"
+                    className="flex items-center justify-between p-3 border rounded-lg mobile-spacing-sm"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-2">
-                        {player.is_host && <Crown className="h-4 w-4 text-yellow-500" />}
-                        <span className="font-medium">{player.name}</span>
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {player.is_host && <Crown className="h-4 w-4 text-yellow-500 flex-shrink-0" />}
+                        <span className="font-medium mobile-text-base truncate">{player.name}</span>
                         {player.id === playerId && (
-                          <Badge variant="secondary" className="text-xs">You</Badge>
+                          <Badge variant="secondary" className="mobile-text-sm flex-shrink-0">You</Badge>
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-shrink-0">
                       {room.game_state === "lobby" && (
                         <>
-                          {room.game_mode === "practice" && player.language && (
-                            <Badge variant="outline" className="text-xs">
+                          {player.language && room.game_mode === "practice" && (
+                            <Badge variant="outline" className="mobile-text-sm">
                               {LANGUAGES.find(l => l.value === player.language)?.label}
                             </Badge>
                           )}
-                          {room.game_mode === "competition" && room.host_language && (
-                            <Badge variant="outline" className="text-xs">
-                              {LANGUAGES.find(l => l.value === room.host_language)?.label}
-                            </Badge>
-                          )}
-                          {((room.game_mode === "practice" && player.language) || 
-                            (room.game_mode === "competition" && room.host_language)) && 
-                           player.ready && (
+                          {player.ready && (
                             <CheckCircle className="h-4 w-4 text-green-500" />
                           )}
                         </>
                       )}
                       {(room.game_state === "playing" || room.game_state === "finished") && (
-                        <Badge variant="secondary">
+                        <Badge variant="secondary" className="mobile-text-sm">
                           {player.score} pts
                         </Badge>
                       )}
@@ -1300,36 +1042,24 @@ export default function RoomPage() {
             </Card>
 
             {/* Game Info */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Game Info</CardTitle>
+            <Card className="mobile-card">
+              <CardHeader className="mobile-padding">
+                <CardTitle className="mobile-text-lg">Game Info</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span>Game Mode:</span>
-                  <Badge variant="outline" className="text-xs">
-                    {room.game_mode ? (
-                      room.game_mode === "practice" ? (
-                        <>
-                          <BookOpen className="h-3 w-3 mr-1" />
-                          Practice
-                        </>
-                      ) : (
-                        <>
-                          <Zap className="h-3 w-3 mr-1" />
-                          Competition
-                        </>
-                      )
-                    ) : "Not Selected"}
-                  </Badge>
-                </div>
+              <CardContent className="mobile-spacing-sm mobile-text-sm mobile-padding">
                 <div className="flex justify-between">
                   <span>Target Score:</span>
                   <span className="font-medium">{room.target_score} points</span>
                 </div>
                 <div className="flex justify-between">
+                  <span>Game Mode:</span>
+                  <Badge variant="outline" className="mobile-text-sm">
+                    {room.game_mode || "Selecting..."}
+                  </Badge>
+                </div>
+                <div className="flex justify-between">
                   <span>Game State:</span>
-                  <Badge variant="outline" className="text-xs">
+                  <Badge variant="outline" className="mobile-text-sm">
                     {room.game_state}
                   </Badge>
                 </div>
@@ -1343,7 +1073,7 @@ export default function RoomPage() {
                   <span>Connection:</span>
                   <Badge 
                     variant="outline" 
-                    className={`text-xs ${
+                    className={`mobile-text-sm ${
                       connectionStatus === 'connected' ? 'bg-green-50 text-green-700 border-green-200' :
                       connectionStatus === 'connecting' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
                       'bg-red-50 text-red-700 border-red-200'
@@ -1355,7 +1085,7 @@ export default function RoomPage() {
                   </Badge>
                 </div>
                 {connectionError && (
-                  <div className="mt-2 p-2 bg-red-50 rounded text-xs">
+                  <div className="mt-2 p-2 bg-red-50 rounded mobile-text-sm">
                     <strong>Error:</strong> {connectionError}
                   </div>
                 )}

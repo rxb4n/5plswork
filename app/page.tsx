@@ -63,7 +63,6 @@ export default function HomePage() {
       setConnectionStatus('connected')
       setConnectionError(null)
       
-      // Request available rooms when connected
       newSocket.emit("get-available-rooms", {}, (response: { rooms: AvailableRoom[] }) => {
         if (response.rooms) {
           setAvailableRooms(response.rooms)
@@ -189,16 +188,17 @@ export default function HomePage() {
   const getGameModeDisplay = (room: AvailableRoom) => {
     if (!room.gameMode) {
       return (
-        <Badge variant="outline" className="text-xs bg-gray-50 text-gray-600">
+        <Badge variant="outline" className="text-xs bg-gray-50 text-gray-600 mobile-touch-target">
           <Settings className="h-3 w-3 mr-1" />
-          Setting up...
+          <span className="hidden sm:inline">Setting up...</span>
+          <span className="sm:hidden">Setup</span>
         </Badge>
       )
     }
 
     if (room.gameMode === "practice") {
       return (
-        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 mobile-touch-target">
           <BookOpen className="h-3 w-3 mr-1" />
           Practice
         </Badge>
@@ -206,9 +206,10 @@ export default function HomePage() {
     }
 
     return (
-      <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200">
+      <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200 mobile-touch-target">
         <Zap className="h-3 w-3 mr-1" />
-        Competition
+        <span className="hidden sm:inline">Competition</span>
+        <span className="sm:hidden">Comp</span>
       </Badge>
     )
   }
@@ -217,9 +218,10 @@ export default function HomePage() {
     if (room.gameMode === "competition" && room.hostLanguage) {
       const language = LANGUAGES.find(l => l.value === room.hostLanguage)
       return (
-        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200 mobile-touch-target">
           <Globe className="h-3 w-3 mr-1" />
-          {language?.label || room.hostLanguage}
+          <span className="hidden sm:inline">{language?.label || room.hostLanguage}</span>
+          <span className="sm:hidden">{language?.label?.split(' ')[0] || room.hostLanguage}</span>
         </Badge>
       )
     }
@@ -227,37 +229,41 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 mobile-no-scroll">
+      <div className="mobile-container mobile-padding">
+        {/* Header - Mobile Optimized */}
+        <div className="text-center mb-6 sm:mb-8">
           <div className="flex items-center justify-center gap-3 mb-4">
-            <Gamepad2 className="h-8 w-8 text-blue-600" />
-            <h1 className="text-4xl font-bold text-gray-900">Language Quiz Game</h1>
+            <Gamepad2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
+            <h1 className="mobile-text-2xl sm:text-4xl font-bold text-gray-900">
+              <span className="hidden sm:inline">Language Quiz Game</span>
+              <span className="sm:hidden">Quiz Game</span>
+            </h1>
           </div>
-          <p className="text-lg text-gray-600">
-            Test your language skills with friends in real-time multiplayer quizzes
+          <p className="mobile-text-base sm:text-lg text-gray-600 px-2">
+            <span className="hidden sm:inline">Test your language skills with friends in real-time multiplayer quizzes</span>
+            <span className="sm:hidden">Multiplayer language quizzes with friends</span>
           </p>
           
-          {/* Connection Status */}
+          {/* Connection Status - Mobile Optimized */}
           <div className="mt-4">
             {connectionStatus === 'connecting' && (
-              <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
-                🔄 Connecting to server...
+              <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 mobile-text-sm">
+                🔄 Connecting...
               </Badge>
             )}
             {connectionStatus === 'connected' && (
-              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 mobile-text-sm">
                 ✅ Connected
               </Badge>
             )}
             {connectionStatus === 'error' && (
-              <div className="space-y-2">
-                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+              <div className="mobile-spacing-sm">
+                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 mobile-text-sm">
                   ❌ Connection failed
                 </Badge>
                 {connectionError && (
-                  <p className="text-sm text-red-600 max-w-md mx-auto">
+                  <p className="mobile-text-sm text-red-600 max-w-md mx-auto mt-2 px-4">
                     {connectionError}
                   </p>
                 )}
@@ -266,20 +272,20 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Main Game Controls */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Player Setup */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Join the Game</CardTitle>
-                <CardDescription>
+        <div className="mobile-grid-stack lg:grid-cols-3 lg:gap-6">
+          {/* Main Game Controls - Mobile Optimized */}
+          <div className="lg:col-span-2 mobile-spacing-md">
+            {/* Player Setup - Mobile Optimized */}
+            <Card className="mobile-card">
+              <CardHeader className="mobile-padding">
+                <CardTitle className="mobile-text-xl">Join the Game</CardTitle>
+                <CardDescription className="mobile-text-base">
                   Enter your name to create or join a quiz room
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="mobile-spacing-md mobile-padding">
                 <div>
-                  <label htmlFor="playerName" className="block text-sm font-medium mb-2">
+                  <label htmlFor="playerName" className="block mobile-text-base font-medium mb-2">
                     Your Name
                   </label>
                   <Input
@@ -289,31 +295,33 @@ export default function HomePage() {
                     value={playerName}
                     onChange={(e) => setPlayerName(e.target.value)}
                     maxLength={20}
+                    className="mobile-input"
                   />
                 </div>
 
-                <div className="grid sm:grid-cols-2 gap-4">
+                <div className="mobile-grid-2col">
                   <SoundButton
                     onClick={handleCreateRoom}
-                    className="w-full"
-                    size="lg"
+                    className="mobile-btn-lg w-full"
                     disabled={!playerName.trim() || connectionStatus !== 'connected'}
                   >
                     <Gamepad2 className="h-5 w-5 mr-2" />
-                    Create New Room
+                    <span className="hidden sm:inline">Create New Room</span>
+                    <span className="sm:hidden">Create Room</span>
                   </SoundButton>
 
-                  <div className="space-y-2">
+                  <div className="mobile-spacing-sm">
                     <Input
                       type="text"
-                      placeholder="Enter room code"
+                      placeholder="Room code"
                       value={roomCode}
                       onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
                       maxLength={6}
+                      className="mobile-input"
                     />
                     <SoundButton
                       onClick={() => handleJoinRoom()}
-                      className="w-full"
+                      className="mobile-btn-md w-full"
                       variant="outline"
                       disabled={!playerName.trim() || !roomCode.trim() || isConnecting || connectionStatus !== 'connected'}
                     >
@@ -324,26 +332,28 @@ export default function HomePage() {
               </CardContent>
             </Card>
 
-            {/* Available Rooms - Updated Layout */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+            {/* Available Rooms - Mobile Optimized */}
+            <Card className="mobile-card">
+              <CardHeader className="mobile-padding">
+                <CardTitle className="flex items-center gap-2 mobile-text-xl">
                   <Users className="h-5 w-5" />
-                  Available Rooms
-                  <Badge variant="secondary">{availableRooms.length}</Badge>
+                  <span className="hidden sm:inline">Available Rooms</span>
+                  <span className="sm:hidden">Rooms</span>
+                  <Badge variant="secondary" className="mobile-text-sm">{availableRooms.length}</Badge>
                 </CardTitle>
-                <CardDescription>
-                  Join an existing game room or create your own
+                <CardDescription className="mobile-text-base">
+                  <span className="hidden sm:inline">Join an existing game room or create your own</span>
+                  <span className="sm:hidden">Join existing rooms</span>
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="mobile-padding">
                 {connectionStatus !== 'connected' ? (
                   <div className="text-center py-8 text-gray-500">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-lg font-medium mb-2">
-                      {connectionStatus === 'connecting' ? 'Connecting to server...' : 'Connection failed'}
+                    <p className="mobile-text-lg font-medium mb-2">
+                      {connectionStatus === 'connecting' ? 'Connecting...' : 'Connection failed'}
                     </p>
-                    <p className="text-sm">
+                    <p className="mobile-text-sm px-4">
                       {connectionStatus === 'connecting' 
                         ? 'Please wait while we establish connection' 
                         : connectionError || 'Please refresh the page to try again'
@@ -353,20 +363,21 @@ export default function HomePage() {
                 ) : availableRooms.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p className="text-lg font-medium mb-2">No active rooms</p>
-                    <p className="text-sm">Be the first to create a room!</p>
+                    <p className="mobile-text-lg font-medium mb-2">No active rooms</p>
+                    <p className="mobile-text-sm">Be the first to create a room!</p>
                   </div>
                 ) : (
-                  <div className="grid gap-3">
+                  <div className="mobile-spacing-sm">
                     {availableRooms.map((room) => (
                       <div
                         key={room.id}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors"
+                        className="mobile-flex-stack sm:flex-row sm:items-center sm:justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors gap-4"
                       >
-                        <div className="flex items-center gap-6 flex-1">
+                        {/* Room Info - Mobile Stacked */}
+                        <div className="mobile-flex-stack sm:flex-row sm:items-center sm:gap-6 flex-1 min-w-0">
                           {/* Room ID */}
                           <div className="min-w-0">
-                            <p className="font-mono text-lg font-bold text-blue-600">
+                            <p className="font-mono mobile-text-lg sm:text-lg font-bold text-blue-600 break-all">
                               {room.id}
                             </p>
                           </div>
@@ -374,25 +385,24 @@ export default function HomePage() {
                           {/* Player Count */}
                           <div className="flex items-center gap-2">
                             <Users className="h-4 w-4 text-gray-500" />
-                            <Badge variant="outline" className="text-xs">
+                            <Badge variant="outline" className="mobile-text-sm">
                               {room.playerCount}/{room.maxPlayers}
                             </Badge>
                           </div>
 
-                          {/* Game Mode */}
-                          <div className="flex items-center gap-2">
+                          {/* Game Mode & Language - Mobile Wrapped */}
+                          <div className="mobile-flex-wrap">
                             {getGameModeDisplay(room)}
                             {getLanguageDisplay(room)}
                           </div>
                         </div>
 
-                        {/* Join Button */}
-                        <div className="ml-4">
+                        {/* Join Button - Mobile Full Width */}
+                        <div className="w-full sm:w-auto sm:ml-4">
                           <SoundButton
                             onClick={() => handleJoinRoom(room.id)}
                             disabled={!playerName.trim() || isConnecting || connectionStatus !== 'connected'}
-                            size="sm"
-                            className="min-w-[80px]"
+                            className="mobile-btn-md w-full sm:w-auto sm:min-w-[80px]"
                           >
                             {isConnecting ? "Joining..." : "Join"}
                           </SoundButton>
@@ -405,16 +415,16 @@ export default function HomePage() {
             </Card>
           </div>
 
-          {/* Settings Panel */}
-          <div className="space-y-6">
+          {/* Settings Panel - Mobile Optimized */}
+          <div className="mobile-spacing-md">
             {/* Audio Settings */}
-            <div className="space-y-4">
+            <div className="mobile-spacing-md">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Settings</h3>
+                <h3 className="mobile-text-lg font-semibold">Settings</h3>
                 <SoundButton
                   onClick={() => setShowAudioSettings(!showAudioSettings)}
                   variant="outline"
-                  size="sm"
+                  className="mobile-btn-sm"
                 >
                   <Volume2 className="h-4 w-4 mr-2" />
                   Audio
@@ -424,47 +434,47 @@ export default function HomePage() {
               {showAudioSettings && <AudioSettings />}
             </div>
 
-            {/* Game Info */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">How to Play</CardTitle>
+            {/* Game Info - Mobile Optimized */}
+            <Card className="mobile-card">
+              <CardHeader className="mobile-padding">
+                <CardTitle className="mobile-text-lg">How to Play</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="space-y-2">
-                  <p className="font-medium">🎯 Game Modes:</p>
-                  <div className="space-y-2 ml-4">
+              <CardContent className="mobile-spacing-sm mobile-text-sm mobile-padding">
+                <div className="mobile-spacing-sm">
+                  <p className="font-medium mobile-text-base">🎯 Game Modes:</p>
+                  <div className="mobile-spacing-sm ml-4">
                     <div className="flex items-start gap-2">
-                      <BookOpen className="h-4 w-4 text-blue-600 mt-0.5" />
-                      <div>
-                        <p className="font-medium text-blue-600">Practice Mode</p>
-                        <p className="text-gray-600 text-xs">Individual language selection, no penalties</p>
+                      <BookOpen className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="font-medium text-blue-600 mobile-text-sm">Practice Mode</p>
+                        <p className="text-gray-600 mobile-text-sm">Individual language selection, no penalties</p>
                       </div>
                     </div>
                     <div className="flex items-start gap-2">
-                      <Zap className="h-4 w-4 text-orange-600 mt-0.5" />
-                      <div>
-                        <p className="font-medium text-orange-600">Competition Mode</p>
-                        <p className="text-gray-600 text-xs">Same language for all, point penalties apply</p>
+                      <Zap className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="font-medium text-orange-600 mobile-text-sm">Competition Mode</p>
+                        <p className="text-gray-600 mobile-text-sm">Same language for all, point penalties apply</p>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <p className="font-medium">🎮 Game Rules:</p>
-                  <ul className="space-y-1 text-gray-600 ml-4">
-                    <li>• Choose your game mode and language</li>
-                    <li>• Translate English words correctly</li>
-                    <li>• Earn points for correct answers</li>
-                    <li>• First to reach target score wins!</li>
+                <div className="mobile-spacing-sm">
+                  <p className="font-medium mobile-text-base">🎮 Game Rules:</p>
+                  <ul className="mobile-spacing-sm text-gray-600 ml-4">
+                    <li className="mobile-text-sm">• Choose your game mode and language</li>
+                    <li className="mobile-text-sm">• Translate English words correctly</li>
+                    <li className="mobile-text-sm">• Earn points for correct answers</li>
+                    <li className="mobile-text-sm">• First to reach target score wins!</li>
                   </ul>
                 </div>
 
-                <div className="space-y-2">
-                  <p className="font-medium">🌍 Languages:</p>
-                  <div className="flex flex-wrap gap-1">
+                <div className="mobile-spacing-sm">
+                  <p className="font-medium mobile-text-base">🌍 Languages:</p>
+                  <div className="mobile-flex-wrap">
                     {["French", "German", "Russian", "Japanese", "Spanish"].map((lang) => (
-                      <Badge key={lang} variant="outline" className="text-xs">
+                      <Badge key={lang} variant="outline" className="mobile-text-sm">
                         {lang}
                       </Badge>
                     ))}
@@ -472,9 +482,9 @@ export default function HomePage() {
                 </div>
 
                 {connectionStatus === 'error' && (
-                  <div className="space-y-2 mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
-                    <p className="font-medium text-red-700">🔧 Connection Issues?</p>
-                    <ul className="space-y-1 text-red-600 text-xs ml-4">
+                  <div className="mobile-spacing-sm mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
+                    <p className="font-medium text-red-700 mobile-text-sm">🔧 Connection Issues?</p>
+                    <ul className="mobile-spacing-sm text-red-600 mobile-text-sm ml-4">
                       <li>• Try refreshing the page</li>
                       <li>• Check your internet connection</li>
                       <li>• Disable ad blockers if any</li>
@@ -482,7 +492,7 @@ export default function HomePage() {
                       <li>• Clear browser cache and cookies</li>
                     </ul>
                     {connectionError && (
-                      <div className="mt-2 p-2 bg-red-100 rounded text-xs">
+                      <div className="mt-2 p-2 bg-red-100 rounded mobile-text-sm">
                         <strong>Error details:</strong> {connectionError}
                       </div>
                     )}

@@ -58,36 +58,37 @@ export function AudioSettings() {
   }
 
   return (
-    <Card className="w-full max-w-md">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+    <Card className="w-full max-w-md mobile-card">
+      <CardHeader className="mobile-padding">
+        <CardTitle className="flex items-center gap-2 mobile-text-lg">
           {isEnabled ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
           Audio Settings
         </CardTitle>
-        <CardDescription>
+        <CardDescription className="mobile-text-base">
           Configure sound effects for the quiz game
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="mobile-spacing-md mobile-padding">
         {/* Enable/Disable Audio */}
         <div className="flex items-center justify-between">
-          <div className="space-y-0.5">
-            <label className="text-sm font-medium">Enable Sound Effects</label>
-            <p className="text-xs text-muted-foreground">
+          <div className="mobile-spacing-sm flex-1 min-w-0">
+            <label className="mobile-text-base font-medium">Enable Sound Effects</label>
+            <p className="mobile-text-sm text-muted-foreground">
               Turn on/off all game sounds
             </p>
           </div>
           <Switch
             checked={isEnabled}
             onCheckedChange={handleEnabledChange}
+            className="mobile-touch-target"
           />
         </div>
 
         {/* Volume Control */}
-        <div className="space-y-2">
+        <div className="mobile-spacing-sm">
           <div className="flex items-center justify-between">
-            <label className="text-sm font-medium">Volume</label>
-            <span className="text-sm text-muted-foreground">{volume}%</span>
+            <label className="mobile-text-base font-medium">Volume</label>
+            <span className="mobile-text-sm text-muted-foreground">{volume}%</span>
           </div>
           <Slider
             value={[volume]}
@@ -96,7 +97,7 @@ export function AudioSettings() {
             min={0}
             step={5}
             disabled={!isEnabled}
-            className="w-full"
+            className="w-full mobile-touch-target"
           />
         </div>
 
@@ -104,16 +105,15 @@ export function AudioSettings() {
         <Button
           onClick={handleTestAudio}
           variant="outline"
-          size="sm"
           disabled={!isEnabled}
-          className="w-full"
+          className="mobile-btn-md w-full"
         >
           <TestTube className="h-4 w-4 mr-2" />
           Test Audio
         </Button>
 
         {/* Audio Info */}
-        <div className="text-xs text-muted-foreground space-y-1">
+        <div className="mobile-text-sm text-muted-foreground mobile-spacing-sm">
           <p>• Click sounds play when pressing buttons</p>
           <p>• Success chimes play for correct answers</p>
           <p>• Buzzer sounds play for incorrect answers</p>
