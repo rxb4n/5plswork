@@ -40,6 +40,8 @@ export interface Room {
   id: string;
   players: Player[];
   game_state: "lobby" | "playing" | "finished";
+  game_mode: "practice" | "competition" | null;
+  host_language: "french" | "german" | "russian" | "japanese" | "spanish" | null;
   winner_id?: string;
   last_activity: Date;
   created_at: Date;
@@ -53,11 +55,13 @@ export async function initDatabase() {
   try {
     console.log("Initializing database...");
 
-    // Create rooms table
+    // Create rooms table with new game mode fields
     await client.query(`
       CREATE TABLE IF NOT EXISTS rooms (
         id VARCHAR(6) PRIMARY KEY,
         game_state VARCHAR(20) DEFAULT 'lobby',
+        game_mode VARCHAR(20),
+        host_language VARCHAR(20),
         winner_id VARCHAR(50),
         last_activity TIMESTAMP DEFAULT NOW(),
         created_at TIMESTAMP DEFAULT NOW(),
@@ -124,8 +128,6 @@ export async function getRoom(roomId: string): Promise<Room | null> {
 
     const room = roomResult.rows[0];
     const players = playersResult.rows.map((p) => {
-      // SIMPLIFIED: Don't try to parse questions from database anymore
-      // Questions will be fetched directly by the client via API
       return {
         id: p.id,
         name: p.name,
@@ -144,6 +146,8 @@ export async function getRoom(roomId: string): Promise<Room | null> {
       id: room.id,
       players,
       game_state: room.game_state,
+      game_mode: room.game_mode,
+      host_language: room.host_language,
       winner_id: room.winner_id,
       last_activity: room.last_activity,
       created_at: room.created_at,
@@ -179,7 +183,6 @@ export async function addPlayerToRoom(roomId: string, player: Omit<Player, "last
 
     console.log(`Adding player ${player.id} to room ${roomId}. Should be host: ${shouldBeHost}`);
 
-    // SIMPLIFIED: Don't store questions in database anymore
     await client.query(
       `INSERT INTO players (id, room_id, name, language, ready, score, is_host, current_question)
        VALUES ($1, $2, $3, $4, $5, $6, $7, NULL)
@@ -260,9 +263,9 @@ export async function updatePlayer(playerId: string, updates: Partial<Player>): 
     let paramIndex = 2;
 
     Object.entries(updates).forEach(([key, value]) => {
-      // SIMPLIFIED: Skip current_question updates - not stored in DB anymore
+      // Skip current_question updates - not stored in DB anymore
       if (key === "current_question") {
-        return; // Skip question updates
+        return;
       } else {
         updateFields.push(`${key} = $${paramIndex}`);
         values.push(value);

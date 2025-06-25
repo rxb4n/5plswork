@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { AudioSettings } from "@/components/audio-settings"
-import { Gamepad2, Users, Settings, Volume2 } from "lucide-react"
+import { Gamepad2, Users, Settings, Volume2, BookOpen, Zap } from "lucide-react"
 import { io, Socket } from "socket.io-client"
 
 interface AvailableRoom {
@@ -16,6 +16,7 @@ interface AvailableRoom {
   maxPlayers: number
   status: "waiting"
   targetScore: number
+  gameMode?: "practice" | "competition" | null
 }
 
 export default function HomePage() {
@@ -32,10 +33,8 @@ export default function HomePage() {
     console.log("🔌 Initializing Socket.IO connection...")
     
     const newSocket = io({
-      // CRITICAL: Correct namespace configuration
       path: "/api/socketio",
       addTrailingSlash: false,
-      // Force polling for Render.com compatibility
       transports: ["polling"],
       upgrade: false,
       forceNew: true,
@@ -47,7 +46,6 @@ export default function HomePage() {
       rememberUpgrade: false,
     })
 
-    // CRITICAL: Enhanced connection success handling
     newSocket.on("connect", () => {
       console.log("✅ Connected to server successfully")
       console.log("  - Socket ID:", newSocket.id)
@@ -64,14 +62,12 @@ export default function HomePage() {
       })
     })
 
-    // CRITICAL: Handle connection success confirmation
     newSocket.on("connection-success", (data) => {
       console.log("🎉 Connection success confirmed:", data)
       setConnectionStatus('connected')
       setConnectionError(null)
     })
 
-    // CRITICAL: Handle namespace errors specifically
     newSocket.on("namespace-error", (error) => {
       console.error("🚨 Namespace error:", error)
       setConnectionStatus('error')
@@ -106,7 +102,6 @@ export default function HomePage() {
       setAvailableRooms(rooms)
     })
 
-    // Enhanced error handling
     newSocket.io.on("error", (error) => {
       console.error("❌ Socket.IO engine error:", error)
       setConnectionStatus('error')
@@ -119,7 +114,6 @@ export default function HomePage() {
       setConnectionError("Failed to reconnect after multiple attempts")
     })
 
-    // CRITICAL: Handle packet errors (including namespace issues)
     newSocket.on("error", (error) => {
       console.error("❌ Socket error:", error)
       if (error.message && error.message.includes("namespace")) {
@@ -325,9 +319,24 @@ export default function HomePage() {
                             <p className="font-mono text-lg font-bold text-blue-600">
                               {room.id}
                             </p>
-                            <p className="text-sm text-gray-500">
-                              Target: {room.targetScore} points
-                            </p>
+                            <div className="flex items-center gap-2 text-sm text-gray-500">
+                              <span>Target: {room.targetScore} points</span>
+                              {room.gameMode && (
+                                <Badge variant="outline" className="text-xs">
+                                  {room.gameMode === "practice" ? (
+                                    <>
+                                      <BookOpen className="h-3 w-3 mr-1" />
+                                      Practice
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Zap className="h-3 w-3 mr-1" />
+                                      Competition
+                                    </>
+                                  )}
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                           <Badge variant="outline">
                             {room.playerCount}/{room.maxPlayers} players
@@ -374,9 +383,29 @@ export default function HomePage() {
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <div className="space-y-2">
-                  <p className="font-medium">🎯 Game Rules:</p>
+                  <p className="font-medium">🎯 Game Modes:</p>
+                  <div className="space-y-2 ml-4">
+                    <div className="flex items-start gap-2">
+                      <BookOpen className="h-4 w-4 text-blue-600 mt-0.5" />
+                      <div>
+                        <p className="font-medium text-blue-600">Practice Mode</p>
+                        <p className="text-gray-600 text-xs">Individual language selection, no penalties</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <Zap className="h-4 w-4 text-orange-600 mt-0.5" />
+                      <div>
+                        <p className="font-medium text-orange-600">Competition Mode</p>
+                        <p className="text-gray-600 text-xs">Same language for all, point penalties apply</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="font-medium">🎮 Game Rules:</p>
                   <ul className="space-y-1 text-gray-600 ml-4">
-                    <li>• Choose your target language</li>
+                    <li>• Choose your game mode and language</li>
                     <li>• Translate English words correctly</li>
                     <li>• Earn points for correct answers</li>
                     <li>• First to reach target score wins!</li>

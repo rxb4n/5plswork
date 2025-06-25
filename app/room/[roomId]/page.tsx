@@ -19,7 +19,11 @@ import {
   Home, 
   Settings,
   Volume2,
-  RotateCcw
+  RotateCcw,
+  Gamepad2,
+  Target,
+  BookOpen,
+  Zap
 } from "lucide-react"
 import { io, Socket } from "socket.io-client"
 
@@ -45,6 +49,8 @@ interface Room {
   id: string
   players: Player[]
   game_state: "lobby" | "playing" | "finished"
+  game_mode: "practice" | "competition" | null
+  host_language: "french" | "german" | "russian" | "japanese" | "spanish" | null
   winner_id?: string
   last_activity: Date
   created_at: Date
@@ -85,7 +91,7 @@ export default function RoomPage() {
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
   const [connectionError, setConnectionError] = useState<string | null>(null)
   
-  // NEW: Answer feedback state
+  // Answer feedback state
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null)
   const [showFeedback, setShowFeedback] = useState(false)
   const [isCorrectAnswer, setIsCorrectAnswer] = useState(false)
@@ -101,10 +107,8 @@ export default function RoomPage() {
     console.log("🔌 Initializing room Socket.IO connection...")
 
     const newSocket = io({
-      // CRITICAL: Correct namespace configuration
       path: "/api/socketio",
       addTrailingSlash: false,
-      // Force polling for Render.com compatibility
       transports: ["polling"],
       upgrade: false,
       forceNew: true,
@@ -114,17 +118,12 @@ export default function RoomPage() {
       timeout: 20000,
     })
 
-    // CRITICAL: Enhanced connection handling
     newSocket.on("connect", () => {
       console.log("✅ Connected to server successfully")
-      console.log("  - Socket ID:", newSocket.id)
-      console.log("  - Transport:", newSocket.io.engine.transport.name)
-      console.log("  - Namespace:", newSocket.nsp.name)
       setConnectionStatus('connected')
       setConnectionError(null)
       
       if (isHost) {
-        // Create room first, then join
         newSocket.emit("create-room", {
           roomId,
           playerId,
@@ -134,24 +133,20 @@ export default function RoomPage() {
             setError(response.error)
             setIsLoading(false)
           } else {
-            // Now join the created room
             joinRoom(newSocket)
           }
         })
       } else {
-        // Just join existing room
         joinRoom(newSocket)
       }
     })
 
-    // CRITICAL: Handle connection success confirmation
     newSocket.on("connection-success", (data) => {
       console.log("🎉 Connection success confirmed:", data)
       setConnectionStatus('connected')
       setConnectionError(null)
     })
 
-    // CRITICAL: Handle namespace errors specifically
     newSocket.on("namespace-error", (error) => {
       console.error("🚨 Namespace error:", error)
       setConnectionStatus('error')
@@ -209,7 +204,6 @@ export default function RoomPage() {
       console.error("Socket error:", message)
       setError(message)
       
-      // If it's a room-related error, redirect to home after a delay
       if (message.includes("Room") || message.includes("closed")) {
         setTimeout(() => {
           router.push("/")
@@ -217,14 +211,12 @@ export default function RoomPage() {
       }
     })
 
-    // Enhanced error handling
     newSocket.io.on("error", (error) => {
       console.error("❌ Socket.IO engine error:", error)
       setConnectionStatus('error')
       setConnectionError(`Engine error: ${error.message || error}`)
     })
 
-    // CRITICAL: Handle packet errors (including namespace issues)
     newSocket.on("error", (error) => {
       console.error("❌ Socket error:", error)
       if (error.message && error.message.includes("namespace")) {
@@ -273,7 +265,6 @@ export default function RoomPage() {
         setCurrentQuestion(data.question)
         setTimeLeft(10)
         setIsAnswering(false)
-        // Reset feedback state for new question
         setSelectedAnswer(null)
         setShowFeedback(false)
         setIsCorrectAnswer(false)
@@ -287,11 +278,17 @@ export default function RoomPage() {
 
   // Auto-fetch question when game state changes to playing
   useEffect(() => {
-    if (room?.game_state === "playing" && currentPlayer?.language && !currentQuestion) {
-      console.log("Game started, fetching initial question...")
-      fetchNewQuestion(currentPlayer.language)
+    if (room?.game_state === "playing" && !currentQuestion) {
+      const languageToUse = room.game_mode === "competition" 
+        ? room.host_language 
+        : currentPlayer?.language
+      
+      if (languageToUse) {
+        console.log("Game started, fetching initial question...")
+        fetchNewQuestion(languageToUse)
+      }
     }
-  }, [room?.game_state, currentPlayer?.language, currentQuestion, fetchNewQuestion])
+  }, [room?.game_state, room?.game_mode, room?.host_language, currentPlayer?.language, currentQuestion, fetchNewQuestion])
 
   // Timer countdown
   useEffect(() => {
@@ -301,10 +298,37 @@ export default function RoomPage() {
       }, 1000)
       return () => clearTimeout(timer)
     } else if (timeLeft === 0 && currentQuestion && !isAnswering && !showFeedback) {
-      // Time's up - submit empty answer
       handleAnswer("")
     }
   }, [timeLeft, currentQuestion, isAnswering, room?.game_state, showFeedback])
+
+  const handleGameModeSelect = (mode: "practice" | "competition") => {
+    if (!socket || !currentPlayer?.is_host) return
+
+    socket.emit("update-game-mode", {
+      roomId,
+      playerId,
+      data: { gameMode: mode }
+    }, (response: any) => {
+      if (response.error) {
+        setError(response.error)
+      }
+    })
+  }
+
+  const handleHostLanguageChange = (language: string) => {
+    if (!socket || !currentPlayer?.is_host) return
+
+    socket.emit("update-host-language", {
+      roomId,
+      playerId,
+      data: { hostLanguage: language }
+    }, (response: any) => {
+      if (response.error) {
+        setError(response.error)
+      }
+    })
+  }
 
   const handleLanguageChange = (language: string) => {
     if (!socket || !currentPlayer) return
@@ -321,7 +345,23 @@ export default function RoomPage() {
   }
 
   const handleToggleReady = () => {
-    if (!socket || !currentPlayer?.language) return
+    if (!socket || !room) return
+
+    // Check readiness requirements based on game mode
+    if (room.game_mode === "competition") {
+      if (!room.host_language) {
+        setError("Host must select a language first")
+        return
+      }
+    } else if (room.game_mode === "practice") {
+      if (!currentPlayer?.language) {
+        setError("Select a language first")
+        return
+      }
+    } else {
+      setError("Game mode must be selected first")
+      return
+    }
 
     socket.emit("toggle-ready", { roomId, playerId }, (response: any) => {
       if (response.error) {
@@ -354,19 +394,16 @@ export default function RoomPage() {
     })
   }
 
-  // ENHANCED: Answer handling with visual feedback
   const handleAnswer = (answer: string) => {
     if (!socket || !currentQuestion || isAnswering || showFeedback) return
 
     setIsAnswering(true)
     setSelectedAnswer(answer)
     
-    // Determine if answer is correct
     const isCorrect = answer === currentQuestion.correctAnswer
     setIsCorrectAnswer(isCorrect)
     
-    // Play sound effect based on correctness
-    if (answer !== "") { // Don't play sounds for timeout
+    if (answer !== "") {
       if (isCorrect) {
         audio.playSuccess()
       } else {
@@ -374,57 +411,58 @@ export default function RoomPage() {
       }
     }
 
-    // Show visual feedback immediately
     setShowFeedback(true)
+
+    // Calculate points based on game mode
+    const isPracticeMode = room?.game_mode === "practice"
+    const pointsData = {
+      answer,
+      timeLeft,
+      correctAnswer: currentQuestion.correctAnswer,
+      isPracticeMode
+    }
 
     socket.emit("answer", {
       roomId,
       playerId,
-      data: {
-        answer,
-        timeLeft,
-        correctAnswer: currentQuestion.correctAnswer
-      }
+      data: pointsData
     }, (response: any) => {
       if (response.error) {
         setError(response.error)
         setIsAnswering(false)
         setShowFeedback(false)
       } else {
-        // Keep feedback visible for 2 seconds, then fetch next question
         setTimeout(() => {
           setShowFeedback(false)
           setIsAnswering(false)
           setSelectedAnswer(null)
           
-          // Fetch next question if game is still playing
-          if (currentPlayer?.language && room?.game_state === "playing") {
-            fetchNewQuestion(currentPlayer.language)
+          const languageToUse = room?.game_mode === "competition" 
+            ? room.host_language 
+            : currentPlayer?.language
+          
+          if (languageToUse && room?.game_state === "playing") {
+            fetchNewQuestion(languageToUse)
           }
-        }, 2000) // 2 seconds to see the feedback
+        }, 2000)
       }
     })
   }
 
-  // Helper function to get button styling based on answer state
   const getAnswerButtonStyle = (option: string) => {
     if (!showFeedback) {
-      return "outline" // Default style when no feedback
+      return "outline"
     }
     
     if (option === currentQuestion?.correctAnswer) {
-      // Always highlight correct answer in green
       return "default"
     } else if (option === selectedAnswer && !isCorrectAnswer) {
-      // Highlight selected wrong answer in red
       return "destructive"
     } else {
-      // Other options remain neutral
       return "outline"
     }
   }
 
-  // Helper function to get button classes for additional styling
   const getAnswerButtonClasses = (option: string) => {
     if (!showFeedback) return ""
     
@@ -548,6 +586,21 @@ export default function RoomPage() {
                 {room.game_state === "playing" && "Game in progress"}
                 {room.game_state === "finished" && "Game finished!"}
               </p>
+              {room.game_mode && (
+                <Badge variant="outline" className="text-xs">
+                  {room.game_mode === "practice" ? (
+                    <>
+                      <BookOpen className="h-3 w-3 mr-1" />
+                      Practice Mode
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="h-3 w-3 mr-1" />
+                      Competition Mode
+                    </>
+                  )}
+                </Badge>
+              )}
               {connectionStatus === 'connecting' && (
                 <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
                   🔄 Reconnecting...
@@ -578,25 +631,76 @@ export default function RoomPage() {
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Main Game Area */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Game State: Lobby */}
-            {room.game_state === "lobby" && (
+            {/* Game Mode Selection (Host Only, Lobby State) */}
+            {room.game_state === "lobby" && currentPlayer.is_host && !room.game_mode && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Game Setup</CardTitle>
+                  <CardTitle className="flex items-center gap-2">
+                    <Gamepad2 className="h-5 w-5" />
+                    Game Mode Selection
+                  </CardTitle>
                   <CardDescription>
-                    Configure your settings and wait for all players to be ready
+                    Choose how players will compete in this quiz room
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  {/* Language Selection */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Choose Your Language</label>
-                    <Select
-                      value={currentPlayer.language || ""}
-                      onValueChange={handleLanguageChange}
+                  <div className="grid gap-4">
+                    <SoundButton
+                      onClick={() => handleGameModeSelect("practice")}
+                      variant="outline"
+                      className="w-full p-6 h-auto flex-col items-start text-left"
                     >
+                      <div className="flex items-center gap-3 mb-2">
+                        <BookOpen className="h-5 w-5 text-blue-600" />
+                        <span className="text-lg font-semibold">Practice Mode</span>
+                      </div>
+                      <ul className="text-sm text-gray-600 space-y-1">
+                        <li>• Players individually select their preferred language</li>
+                        <li>• No point penalties for incorrect answers or timeouts</li>
+                        <li>• Focus on learning and improvement</li>
+                        <li>• Relaxed, educational gameplay</li>
+                      </ul>
+                    </SoundButton>
+
+                    <SoundButton
+                      onClick={() => handleGameModeSelect("competition")}
+                      variant="outline"
+                      className="w-full p-6 h-auto flex-col items-start text-left"
+                    >
+                      <div className="flex items-center gap-3 mb-2">
+                        <Zap className="h-5 w-5 text-orange-600" />
+                        <span className="text-lg font-semibold">Competition Mode</span>
+                      </div>
+                      <ul className="text-sm text-gray-600 space-y-1">
+                        <li>• All players use the host's selected language</li>
+                        <li>• Point penalties apply for incorrect answers (-5 points)</li>
+                        <li>• Competitive scoring system</li>
+                        <li>• Race to reach the target score first</li>
+                      </ul>
+                    </SoundButton>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Competition Mode Language Selection (Host Only) */}
+            {room.game_state === "lobby" && currentPlayer.is_host && room.game_mode === "competition" && !room.host_language && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Target className="h-5 w-5" />
+                    Competition Language Selection
+                  </CardTitle>
+                  <CardDescription>
+                    Choose the language all players will compete in
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Competition Language</label>
+                    <Select onValueChange={handleHostLanguageChange}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select a language to learn" />
+                        <SelectValue placeholder="Select the competition language" />
                       </SelectTrigger>
                       <SelectContent>
                         {LANGUAGES.map((lang) => (
@@ -607,6 +711,62 @@ export default function RoomPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="p-3 bg-orange-50 rounded-lg border border-orange-200">
+                    <p className="text-sm text-orange-700">
+                      <strong>Competition Mode:</strong> All players will answer questions in {room.host_language ? LANGUAGES.find(l => l.value === room.host_language)?.label : "the selected language"}. Wrong answers will result in -5 point penalties.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Game Setup (After Mode Selection) */}
+            {room.game_state === "lobby" && room.game_mode && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Game Setup</CardTitle>
+                  <CardDescription>
+                    Configure your settings and wait for all players to be ready
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Practice Mode: Individual Language Selection */}
+                  {room.game_mode === "practice" && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Choose Your Language</label>
+                      <Select
+                        value={currentPlayer.language || ""}
+                        onValueChange={handleLanguageChange}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a language to learn" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {LANGUAGES.map((lang) => (
+                            <SelectItem key={lang.value} value={lang.value}>
+                              {lang.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {/* Competition Mode: Show Selected Language */}
+                  {room.game_mode === "competition" && room.host_language && (
+                    <div className="p-4 bg-orange-50 rounded-lg border border-orange-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Target className="h-4 w-4 text-orange-600" />
+                        <span className="font-medium text-orange-800">Competition Language</span>
+                      </div>
+                      <p className="text-orange-700">
+                        All players will compete in: <strong>{LANGUAGES.find(l => l.value === room.host_language)?.label}</strong>
+                      </p>
+                      <p className="text-sm text-orange-600 mt-1">
+                        Wrong answers will result in -5 point penalties
+                      </p>
+                    </div>
+                  )}
 
                   {/* Target Score (Host Only) */}
                   {currentPlayer.is_host && (
@@ -634,7 +794,11 @@ export default function RoomPage() {
                   <div className="flex items-center gap-4">
                     <SoundButton
                       onClick={handleToggleReady}
-                      disabled={!currentPlayer.language || connectionStatus !== 'connected'}
+                      disabled={
+                        connectionStatus !== 'connected' ||
+                        (room.game_mode === "practice" && !currentPlayer.language) ||
+                        (room.game_mode === "competition" && !room.host_language)
+                      }
                       variant={currentPlayer.ready ? "default" : "outline"}
                       className="flex-1"
                     >
@@ -645,7 +809,12 @@ export default function RoomPage() {
                     {currentPlayer.is_host && (
                       <SoundButton
                         onClick={handleStartGame}
-                        disabled={!room.players.every(p => p.language && p.ready) || connectionStatus !== 'connected'}
+                        disabled={
+                          connectionStatus !== 'connected' ||
+                          !room.players.every(p => p.ready) ||
+                          (room.game_mode === "practice" && !room.players.every(p => p.language)) ||
+                          (room.game_mode === "competition" && !room.host_language)
+                        }
                         size="lg"
                         className="flex-1"
                       >
@@ -658,9 +827,19 @@ export default function RoomPage() {
                   <div className="text-sm text-gray-600 space-y-1">
                     <p className="font-medium">Requirements to start:</p>
                     <ul className="space-y-1 ml-4">
-                      <li className={room.players.every(p => p.language) ? "text-green-600" : "text-red-600"}>
-                        • All players must select a language
+                      <li className={room.game_mode ? "text-green-600" : "text-red-600"}>
+                        • Game mode must be selected
                       </li>
+                      {room.game_mode === "practice" && (
+                        <li className={room.players.every(p => p.language) ? "text-green-600" : "text-red-600"}>
+                          • All players must select a language
+                        </li>
+                      )}
+                      {room.game_mode === "competition" && (
+                        <li className={room.host_language ? "text-green-600" : "text-red-600"}>
+                          • Host must select competition language
+                        </li>
+                      )}
                       <li className={room.players.every(p => p.ready) ? "text-green-600" : "text-red-600"}>
                         • All players must be ready
                       </li>
@@ -691,8 +870,17 @@ export default function RoomPage() {
                       {currentQuestion.english}
                     </p>
                     <p className="text-gray-600">
-                      Translate to {LANGUAGES.find(l => l.value === currentPlayer.language)?.label}
+                      Translate to {
+                        room.game_mode === "competition" 
+                          ? LANGUAGES.find(l => l.value === room.host_language)?.label
+                          : LANGUAGES.find(l => l.value === currentPlayer.language)?.label
+                      }
                     </p>
+                    {room.game_mode === "practice" && (
+                      <p className="text-sm text-green-600 mt-1">
+                        Practice Mode: No penalties for wrong answers
+                      </p>
+                    )}
                   </div>
 
                   {/* Timer Progress */}
@@ -812,12 +1000,19 @@ export default function RoomPage() {
                     <div className="flex items-center gap-2">
                       {room.game_state === "lobby" && (
                         <>
-                          {player.language && (
+                          {room.game_mode === "practice" && player.language && (
                             <Badge variant="outline" className="text-xs">
                               {LANGUAGES.find(l => l.value === player.language)?.label}
                             </Badge>
                           )}
-                          {player.ready && player.language && (
+                          {room.game_mode === "competition" && room.host_language && (
+                            <Badge variant="outline" className="text-xs">
+                              {LANGUAGES.find(l => l.value === room.host_language)?.label}
+                            </Badge>
+                          )}
+                          {((room.game_mode === "practice" && player.language) || 
+                            (room.game_mode === "competition" && room.host_language)) && 
+                           player.ready && (
                             <CheckCircle className="h-4 w-4 text-green-500" />
                           )}
                         </>
@@ -839,6 +1034,24 @@ export default function RoomPage() {
                 <CardTitle className="text-lg">Game Info</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span>Game Mode:</span>
+                  <Badge variant="outline" className="text-xs">
+                    {room.game_mode ? (
+                      room.game_mode === "practice" ? (
+                        <>
+                          <BookOpen className="h-3 w-3 mr-1" />
+                          Practice
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="h-3 w-3 mr-1" />
+                          Competition
+                        </>
+                      )
+                    ) : "Not Selected"}
+                  </Badge>
+                </div>
                 <div className="flex justify-between">
                   <span>Target Score:</span>
                   <span className="font-medium">{room.target_score} points</span>
