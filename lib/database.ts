@@ -40,16 +40,22 @@ export interface Room {
   id: string;
   players: Player[];
   game_state: "lobby" | "playing" | "finished";
-  game_mode: "practice" | "competition" | null;
+  game_mode: "practice" | "competition" | "cooperation" | null;
   host_language: "french" | "german" | "russian" | "japanese" | "spanish" | null;
   winner_id?: string;
   last_activity: Date;
   created_at: Date;
   question_count: number;
   target_score: number;
+  // Cooperation mode specific fields
+  cooperation_lives?: number;
+  cooperation_score?: number;
+  used_words?: string[];
+  current_category?: string;
+  current_challenge_player?: string;
 }
 
-// Enhanced database initialization with proper column checks
+// Enhanced database initialization with cooperation mode support
 export async function initDatabase() {
   const client = await pool.connect();
   try {
@@ -100,6 +106,32 @@ export async function initDatabase() {
       console.log("✅ host_language column added successfully");
     }
 
+    // Check and add cooperation mode columns
+    const cooperationColumns = [
+      { name: 'cooperation_lives', type: 'INTEGER DEFAULT 3' },
+      { name: 'cooperation_score', type: 'INTEGER DEFAULT 0' },
+      { name: 'used_words', type: 'TEXT[]' },
+      { name: 'current_category', type: 'VARCHAR(50)' },
+      { name: 'current_challenge_player', type: 'VARCHAR(50)' }
+    ];
+
+    for (const column of cooperationColumns) {
+      const columnCheck = await client.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'rooms' AND column_name = '${column.name}'
+      `);
+      
+      if (columnCheck.rows.length === 0) {
+        console.log(`➕ Adding ${column.name} column to rooms table...`);
+        await client.query(`
+          ALTER TABLE rooms 
+          ADD COLUMN ${column.name} ${column.type}
+        `);
+        console.log(`✅ ${column.name} column added successfully`);
+      }
+    }
+
     // Create players table
     await client.query(`
       CREATE TABLE IF NOT EXISTS players (
@@ -136,7 +168,7 @@ export async function initDatabase() {
       console.log(`  - ${row.column_name}: ${row.data_type}`);
     });
 
-    console.log("✅ Database initialized successfully");
+    console.log("✅ Database initialized successfully with cooperation mode support");
   } catch (error) {
     console.error("❌ Database initialization error:", error);
     throw error;
@@ -247,6 +279,12 @@ export async function getRoom(roomId: string): Promise<Room | null> {
       created_at: room.created_at,
       question_count: room.question_count,
       target_score: room.target_score || 100,
+      // Cooperation mode fields
+      cooperation_lives: room.cooperation_lives,
+      cooperation_score: room.cooperation_score,
+      used_words: room.used_words || [],
+      current_category: room.current_category,
+      current_challenge_player: room.current_challenge_player,
     };
   } catch (error) {
     console.error(`Error getting room ${roomId}:`, error);
@@ -431,8 +469,14 @@ export async function updateRoom(roomId: string, updates: Partial<Omit<Room, "pl
     let paramIndex = 2;
 
     Object.entries(updates).forEach(([key, value]) => {
-      updateFields.push(`${key} = $${paramIndex}`);
-      values.push(value);
+      if (key === 'used_words') {
+        // Handle array fields specially for PostgreSQL
+        updateFields.push(`${key} = $${paramIndex}`);
+        values.push(value);
+      } else {
+        updateFields.push(`${key} = $${paramIndex}`);
+        values.push(value);
+      }
       paramIndex++;
     });
 
