@@ -75,6 +75,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           socket.join(roomId)
           callback({ room })
           io.to(roomId).emit("room-update", { room })
+          
+          // Broadcast available rooms update
+          broadcastAvailableRooms(io)
+          
           console.log(`✅ Room ${roomId} created successfully`)
         } catch (error) {
           console.error(`❌ Error creating room ${roomId}:`, error)
@@ -89,6 +93,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           if (!room) {
             return callback({ error: "Room not found", status: 404 })
           }
+          
+          // FEATURE 1: Strict access control - block if game is playing
+          if (room.game_state === "playing") {
+            console.log(`🚫 Blocked join attempt - Room ${roomId} is currently playing`)
+            return callback({ 
+              error: "Cannot join: Game is already in progress. Please wait for the game to finish.", 
+              status: 403 
+            })
+          }
+          
           const player: Omit<Player, "last_seen"> = {
             id: playerId,
             name: data.name,
@@ -106,10 +120,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
+          
+          // Broadcast available rooms update
+          broadcastAvailableRooms(io)
+          
           console.log(`✅ Player ${playerId} joined room ${roomId}`)
         } catch (error) {
           console.error(`❌ Error joining room ${roomId}:`, error)
           callback({ error: "Failed to join room", status: 500 })
+        }
+      })
+
+      // NEW: Get available rooms handler
+      socket.on("get-available-rooms", async ({}, callback) => {
+        try {
+          console.log("🔍 Fetching available rooms...")
+          const availableRooms = await getAvailableRooms()
+          console.log(`✅ Found ${availableRooms.length} available rooms`)
+          callback({ rooms: availableRooms })
+        } catch (error) {
+          console.error("❌ Error fetching available rooms:", error)
+          callback({ error: "Failed to fetch available rooms", rooms: [] })
         }
       })
 
@@ -250,6 +281,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
+          
+          // Broadcast available rooms update (room is now playing, so won't appear in available list)
+          broadcastAvailableRooms(io)
         } catch (error) {
           console.error(`❌ Error starting game for room ${roomId}:`, error)
           callback({ error: "Failed to start game", status: 500 })
@@ -299,6 +333,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             const finalRoom = await getRoom(roomId)
             callback({ room: finalRoom })
             io.to(roomId).emit("room-update", { room: finalRoom })
+            
+            // Broadcast available rooms update (game finished, room might be available again)
+            broadcastAvailableRooms(io)
             return
           }
 
@@ -339,6 +376,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const updatedRoom = await getRoom(roomId)
           callback({ room: updatedRoom })
           io.to(roomId).emit("room-update", { room: updatedRoom })
+          
+          // Broadcast available rooms update
+          broadcastAvailableRooms(io)
+          
           console.log(`✅ Game restarted in room ${roomId}`)
         } catch (error) {
           console.error(`❌ Error restarting game for room ${roomId}:`, error)
@@ -371,6 +412,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             console.log(`🏠 Room ${roomId} is now empty`)
             // Notify any remaining clients that room is closed
             io.to(roomId).emit("error", { message: "Room closed", status: 404 })
+            
+            // Broadcast available rooms update (room is now empty)
+            broadcastAvailableRooms(io)
             return
           }
           
@@ -386,6 +430,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             // Normal player left - just update room
             io.to(roomId).emit("room-update", { room })
           }
+          
+          // Broadcast available rooms update
+          broadcastAvailableRooms(io)
           
           console.log(`✅ Player ${playerId} left room ${roomId}`)
         } catch (error) {
@@ -404,6 +451,62 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   res.status(200).end()
+}
+
+// NEW: Function to get available rooms
+async function getAvailableRooms() {
+  try {
+    const { Pool } = require("pg")
+    
+    const pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+    })
+
+    const client = await pool.connect()
+    
+    try {
+      // Get rooms that are in lobby state (not playing or finished)
+      const roomsResult = await client.query(`
+        SELECT r.id, r.target_score, COUNT(p.id) as player_count
+        FROM rooms r
+        LEFT JOIN players p ON r.id = p.room_id
+        WHERE r.game_state = 'lobby'
+        AND r.last_activity > NOW() - INTERVAL '1 hour'
+        GROUP BY r.id, r.target_score
+        HAVING COUNT(p.id) > 0 AND COUNT(p.id) < 8
+        ORDER BY r.created_at DESC
+        LIMIT 20
+      `)
+
+      const availableRooms = roomsResult.rows.map(row => ({
+        id: row.id,
+        playerCount: parseInt(row.player_count),
+        maxPlayers: 8, // Set a reasonable max
+        status: "waiting" as const,
+        targetScore: row.target_score || 100,
+      }))
+
+      console.log(`📊 Found ${availableRooms.length} available rooms`)
+      return availableRooms
+    } finally {
+      client.release()
+    }
+  } catch (error) {
+    console.error("❌ Error fetching available rooms:", error)
+    return []
+  }
+}
+
+// NEW: Function to broadcast available rooms to all connected clients
+async function broadcastAvailableRooms(io: SocketIOServer) {
+  try {
+    const availableRooms = await getAvailableRooms()
+    io.emit("available-rooms-update", { rooms: availableRooms })
+    console.log(`📡 Broadcasted ${availableRooms.length} available rooms to all clients`)
+  } catch (error) {
+    console.error("❌ Error broadcasting available rooms:", error)
+  }
 }
 
 // Disable body parsing for Socket.IO
