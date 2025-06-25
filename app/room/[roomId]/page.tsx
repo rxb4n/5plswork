@@ -24,7 +24,8 @@ import {
   Target,
   BookOpen,
   Zap,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw
 } from "lucide-react"
 import { io, Socket } from "socket.io-client"
 
@@ -97,12 +98,19 @@ export default function RoomPage() {
   const [showFeedback, setShowFeedback] = useState(false)
   const [isCorrectAnswer, setIsCorrectAnswer] = useState(false)
 
-  // NEW: Inactivity warning state
+  // Inactivity warning state
   const [inactivityWarning, setInactivityWarning] = useState<{
     show: boolean
     message: string
     countdown: number
   }>({ show: false, message: "", countdown: 0 })
+
+  // NEW: Game mode transition state
+  const [gameModeTransition, setGameModeTransition] = useState<{
+    show: boolean
+    message: string
+    newMode: string
+  }>({ show: false, message: "", newMode: "" })
 
   // Initialize socket and join room
   useEffect(() => {
@@ -219,7 +227,7 @@ export default function RoomPage() {
       }
     })
 
-    // NEW: Handle inactivity warnings
+    // Handle inactivity warnings
     newSocket.on("room-warning", (warning) => {
       console.log("⚠️ Received room warning:", warning)
       if (warning.type === "inactivity_warning") {
@@ -229,14 +237,13 @@ export default function RoomPage() {
           countdown: warning.countdown
         })
         
-        // Auto-hide warning after countdown
         setTimeout(() => {
           setInactivityWarning(prev => ({ ...prev, show: false }))
         }, warning.countdown * 1000)
       }
     })
 
-    // NEW: Handle room closure
+    // Handle room closure
     newSocket.on("room-closed", (data) => {
       console.log("🚨 Room closed:", data)
       setError(`Room closed: ${data.message}`)
@@ -245,13 +252,28 @@ export default function RoomPage() {
       }, 3000)
     })
 
-    // NEW: Handle forced disconnection
+    // Handle forced disconnection
     newSocket.on("force-disconnect", (data) => {
       console.log("🚨 Forced disconnect:", data)
       setError(data.reason)
       setTimeout(() => {
         router.push(data.redirectTo || "/")
       }, 2000)
+    })
+
+    // NEW: Handle game mode change notifications
+    newSocket.on("game-mode-changed", (data) => {
+      console.log("🎮 Game mode changed:", data)
+      setGameModeTransition({
+        show: true,
+        message: `Game mode changed to ${data.newMode}`,
+        newMode: data.newMode
+      })
+      
+      // Auto-hide notification after 3 seconds
+      setTimeout(() => {
+        setGameModeTransition(prev => ({ ...prev, show: false }))
+      }, 3000)
     })
 
     newSocket.io.on("error", (error) => {
@@ -282,7 +304,7 @@ export default function RoomPage() {
     }
   }, [roomId, playerId, playerName, isHost, router])
 
-  // NEW: Send activity pings to keep room alive
+  // Send activity pings to keep room alive
   useEffect(() => {
     if (!socket || !roomId || !playerId || !room) return
 
@@ -290,7 +312,7 @@ export default function RoomPage() {
       if (socket.connected) {
         socket.emit("room-activity-ping", { roomId, playerId })
       }
-    }, 30000) // Send ping every 30 seconds
+    }, 30000)
 
     return () => clearInterval(activityInterval)
   }, [socket, roomId, playerId, room])
@@ -381,6 +403,32 @@ export default function RoomPage() {
     }, (response: any) => {
       if (response.error) {
         setError(response.error)
+      }
+    })
+  }
+
+  // NEW: Handle game mode change (reset and switch)
+  const handleChangeGameMode = () => {
+    if (!socket || !currentPlayer?.is_host) return
+
+    // Reset the room to allow mode selection
+    socket.emit("change-game-mode", {
+      roomId,
+      playerId
+    }, (response: any) => {
+      if (response.error) {
+        setError(response.error)
+      } else {
+        // Show transition notification
+        setGameModeTransition({
+          show: true,
+          message: "Game mode reset - please select a new mode",
+          newMode: "selection"
+        })
+        
+        setTimeout(() => {
+          setGameModeTransition(prev => ({ ...prev, show: false }))
+        }, 3000)
       }
     })
   }
@@ -642,13 +690,23 @@ export default function RoomPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      {/* NEW: Inactivity Warning Banner */}
+      {/* Inactivity Warning Banner */}
       {inactivityWarning.show && (
         <div className="fixed top-0 left-0 right-0 z-50 bg-yellow-500 text-white p-4 text-center">
           <div className="flex items-center justify-center gap-2">
             <AlertTriangle className="h-5 w-5" />
             <span className="font-medium">{inactivityWarning.message}</span>
             <span className="font-bold">({inactivityWarning.countdown}s)</span>
+          </div>
+        </div>
+      )}
+
+      {/* NEW: Game Mode Transition Banner */}
+      {gameModeTransition.show && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-blue-500 text-white p-4 text-center">
+          <div className="flex items-center justify-center gap-2">
+            <RefreshCw className="h-5 w-5 animate-spin" />
+            <span className="font-medium">{gameModeTransition.message}</span>
           </div>
         </div>
       )}
@@ -694,6 +752,18 @@ export default function RoomPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* NEW: Change Game Mode Button (Host Only, Lobby State) */}
+            {room.game_state === "lobby" && currentPlayer.is_host && room.game_mode && (
+              <SoundButton
+                onClick={handleChangeGameMode}
+                variant="outline"
+                size="sm"
+                className="bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Change Mode
+              </SoundButton>
+            )}
             <SoundButton
               onClick={() => setShowAudioSettings(!showAudioSettings)}
               variant="outline"
@@ -804,7 +874,21 @@ export default function RoomPage() {
             {room.game_state === "lobby" && room.game_mode && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Game Setup</CardTitle>
+                  <CardTitle className="flex items-center justify-between">
+                    <span>Game Setup</span>
+                    {/* NEW: Change Mode Button in Header */}
+                    {currentPlayer.is_host && (
+                      <SoundButton
+                        onClick={handleChangeGameMode}
+                        variant="outline"
+                        size="sm"
+                        className="bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100"
+                      >
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Change Mode
+                      </SoundButton>
+                    )}
+                  </CardTitle>
                   <CardDescription>
                     Configure your settings and wait for all players to be ready
                   </CardDescription>

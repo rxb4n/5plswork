@@ -302,7 +302,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       })
 
-      // NEW: Handle activity pings to keep rooms alive
+      // Handle activity pings to keep rooms alive
       socket.on("room-activity-ping", ({ roomId, playerId }) => {
         if (roomId && playerId) {
           updateRoomActivityTracker(roomId, playerId)
@@ -349,6 +349,60 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         } catch (error) {
           console.error(`❌ Error updating game mode for room ${roomId}:`, error)
           callback({ error: "Failed to update game mode", status: 500 })
+        }
+      })
+
+      // NEW: Handle game mode change (reset and allow new selection)
+      socket.on("change-game-mode", async ({ roomId, playerId }, callback) => {
+        try {
+          console.log(`🔄 Changing game mode for room ${roomId} by host ${playerId}`)
+          const room = await getRoom(roomId)
+          if (!room) {
+            return callback({ error: "Room not found", status: 404 })
+          }
+          const player = room.players.find((p) => p.id === playerId)
+          if (!player || !player.is_host) {
+            return callback({ error: "Only the room creator can change the game mode", status: 403 })
+          }
+          
+          // Track room activity
+          updateRoomActivityTracker(roomId, playerId)
+          
+          // Reset game mode and related settings
+          const success = await updateRoom(roomId, { 
+            game_mode: null,
+            host_language: null
+          })
+          if (!success) {
+            return callback({ error: "Failed to reset game mode", status: 500 })
+          }
+
+          // Reset all players' ready status and language (for practice mode)
+          for (const p of room.players) {
+            await updatePlayer(p.id, { 
+              ready: false,
+              language: null
+            })
+          }
+
+          const updatedRoom = await getRoom(roomId)
+          callback({ room: updatedRoom })
+          
+          // Notify all players about the game mode change
+          io.to(roomId).emit("game-mode-changed", {
+            type: "mode_reset",
+            message: "Host is changing the game mode",
+            newMode: "selection",
+            timestamp: new Date().toISOString()
+          })
+          
+          io.to(roomId).emit("room-update", { room: updatedRoom })
+          broadcastAvailableRooms(io)
+          
+          console.log(`✅ Game mode reset for room ${roomId}`)
+        } catch (error) {
+          console.error(`❌ Error changing game mode for room ${roomId}:`, error)
+          callback({ error: "Failed to change game mode", status: 500 })
         }
       })
 
