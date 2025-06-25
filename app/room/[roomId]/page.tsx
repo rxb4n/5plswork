@@ -542,19 +542,20 @@ export default function RoomPage() {
       }
     })
     
-// FIXED: Show feedback for full 2000ms, then load next question
-setTimeout(() => {
-  setShowAnswerFeedback(false)
-  setIsAnswering(false)
-  setCurrentQuestion(null)
-  
-  // Load next question after feedback is hidden
-  if (room && (room.game_mode === "practice" || room.game_mode === "competition")) {
+    // Reset for next question after delay
     setTimeout(() => {
-      loadQuestion(room)
-    }, 0)
+      setShowAnswerFeedback(false)
+      setIsAnswering(false)
+      setCurrentQuestion(null)
+      
+      // Load next question if still playing
+      if (room && (room.game_mode === "practice" || room.game_mode === "competition")) {
+        setTimeout(() => {
+          loadQuestion(room)
+        }, 0)
+      }
+    }, 1000)
   }
-}, 1000)
 
   // Handle language selection
   const handleLanguageChange = (language: string) => {
@@ -1577,5 +1578,4 @@ setTimeout(() => {
       </div>
     </div>
   )
-}
 }
