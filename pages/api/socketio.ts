@@ -614,6 +614,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const updateData: any = { game_state: "playing", question_count: 0 }
           if (room.game_mode === "cooperation") {
             updateData.cooperation_waiting = true
+            // Set first challenge player randomly
+            const randomPlayer = room.players[Math.floor(Math.random() * room.players.length)]
+            updateData.current_challenge_player = randomPlayer.id
           }
 
           const roomUpdateSuccess = await updateRoom(roomId, updateData)
@@ -907,7 +910,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.status(200).end()
 }
 
-// Function to start a cooperation challenge
+// Enhanced function to start a cooperation challenge
 async function startCooperationChallenge(roomId: string, io: SocketIOServer) {
   try {
     const room = await getRoom(roomId)
@@ -932,33 +935,48 @@ async function startCooperationChallenge(roomId: string, io: SocketIOServer) {
 
     console.log(`🎯 Starting cooperation challenge for room ${roomId} in ${challengeLanguage}`)
 
-    // Get a random category challenge
-    const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/get-cooperation-category`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ language: challengeLanguage })
-    })
-
-    if (response.ok) {
-      const data = await response.json()
-      const challenge = data.category
-
-      // Update room with current challenge info
-      await updateRoom(roomId, {
-        current_category: challenge.categoryId,
-        current_challenge_player: randomPlayer.id,
-        cooperation_waiting: false
-      })
-
-      // Send challenge to all players
-      io.to(roomId).emit("cooperation-challenge", { challenge })
-      console.log(`✅ Cooperation challenge sent to room ${roomId}:`, challenge)
-    } else {
-      console.error("Failed to fetch cooperation category")
+    // Create challenge directly instead of using external fetch
+    const categories = ["colors", "animals", "food", "vehicles", "clothing", "sports", "household"]
+    const randomCategory = categories[Math.floor(Math.random() * categories.length)]
+    
+    const categoryTranslations = {
+      colors: { french: "Couleurs", spanish: "Colores", german: "Farben", japanese: "色", russian: "Цвета" },
+      animals: { french: "Animaux", spanish: "Animales", german: "Tiere", japanese: "動物", russian: "Животные" },
+      food: { french: "Nourriture", spanish: "Comida", german: "Essen", japanese: "食べ物", russian: "Еда" },
+      vehicles: { french: "Véhicules", spanish: "Vehículos", german: "Fahrzeuge", japanese: "乗り物", russian: "Транспорт" },
+      clothing: { french: "Vêtements", spanish: "Ropa", german: "Kleidung", japanese: "服", russian: "Одежда" },
+      sports: { french: "Sports", spanish: "Deportes", german: "Sport", japanese: "スポーツ", russian: "Спорт" },
+      household: { french: "Objets ménagers", spanish: "Artículos del hogar", german: "Haushaltsgegenstände", japanese: "家庭用品", russian: "Предметы быта" }
     }
 
+    const translatedName = categoryTranslations[randomCategory]?.[challengeLanguage] || randomCategory
+
+    const challenge = {
+      categoryId: randomCategory,
+      categoryName: translatedName,
+      englishName: randomCategory.charAt(0).toUpperCase() + randomCategory.slice(1),
+      language: challengeLanguage,
+      challengeId: `coop-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+    }
+
+    // Update room with current challenge info
+    await updateRoom(roomId, {
+      current_category: challenge.categoryId,
+      current_challenge_player: randomPlayer.id,
+      cooperation_waiting: false
+    })
+
+    // Send challenge to all players
+    io.to(roomId).emit("cooperation-challenge", { challenge })
+    console.log(`✅ Cooperation challenge sent to room ${roomId}:`, challenge)
+
   } catch (error) {
-    console.error("Error starting cooperation challenge:", error)
+    console.error("❌ Error starting cooperation challenge:", error)
+    // Send error to room
+    io.to(roomId).emit("cooperation-error", { 
+      message: "Failed to start cooperation challenge",
+      error: error.message 
+    })
   }
 }
 
