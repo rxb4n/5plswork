@@ -69,6 +69,34 @@ async function migrateDatabase() {
       console.log('✅ host_language column already exists');
     }
     
+    // Check and add cooperation mode columns
+    const cooperationColumns = [
+      { name: 'cooperation_lives', type: 'INTEGER DEFAULT 3' },
+      { name: 'cooperation_score', type: 'INTEGER DEFAULT 0' },
+      { name: 'used_words', type: 'TEXT[]' },
+      { name: 'current_category', type: 'VARCHAR(50)' },
+      { name: 'current_challenge_player', type: 'VARCHAR(50)' }
+    ];
+
+    for (const column of cooperationColumns) {
+      const columnCheck = await client.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'rooms' AND column_name = '${column.name}'
+      `);
+      
+      if (columnCheck.rows.length === 0) {
+        console.log(`➕ Adding ${column.name} column...`);
+        await client.query(`
+          ALTER TABLE rooms 
+          ADD COLUMN ${column.name} ${column.type}
+        `);
+        console.log(`✅ ${column.name} column added successfully`);
+      } else {
+        console.log(`✅ ${column.name} column already exists`);
+      }
+    }
+    
     // Commit transaction
     await client.query('COMMIT');
     console.log('🎉 Database migration completed successfully!');

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { AudioSettings } from "@/components/audio-settings"
-import { Gamepad2, Users, Settings, Volume2, BookOpen, Zap, Globe } from "lucide-react"
+import { Gamepad2, Users, Settings, Volume2, BookOpen, Zap, Globe, HandHeart } from "lucide-react"
 import { io, Socket } from "socket.io-client"
 
 interface AvailableRoom {
@@ -16,7 +16,7 @@ interface AvailableRoom {
   maxPlayers: number
   status: "waiting"
   targetScore: number
-  gameMode?: "practice" | "competition" | null
+  gameMode?: "practice" | "competition" | "cooperation" | null
   hostLanguage?: "french" | "german" | "russian" | "japanese" | "spanish" | null
 }
 
@@ -201,6 +201,16 @@ export default function HomePage() {
         <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 mobile-touch-target">
           <BookOpen className="h-3 w-3 mr-1" />
           Practice
+        </Badge>
+      )
+    }
+
+    if (room.gameMode === "cooperation") {
+      return (
+        <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200 mobile-touch-target">
+          <HandHeart className="h-3 w-3 mr-1" />
+          <span className="hidden sm:inline">Cooperation</span>
+          <span className="sm:hidden">Coop</span>
         </Badge>
       )
     }
@@ -455,6 +465,13 @@ export default function HomePage() {
                       <div className="min-w-0">
                         <p className="font-medium text-orange-600 mobile-text-sm">Competition Mode</p>
                         <p className="text-gray-600 mobile-text-sm">Same language for all, point penalties apply</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <HandHeart className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="font-medium text-purple-600 mobile-text-sm">Cooperation Mode</p>
+                        <p className="text-gray-600 mobile-text-sm">2 players, type words by category, share 3 lives</p>
                       </div>
                     </div>
                   </div>
