@@ -553,8 +553,9 @@ export default function RoomPage() {
     // Load next question if still playing
     if (room?.game_state === "playing") {
       loadQuestion(room)
-    }
-  }, 2000) // Changed from 0 to 2000 to show feedback for 2 seconds
+      }
+    }, 2000) // Changed from 0 to 2000 to show feedback for 2 seconds
+  }
 
   // Handle language selection
   const handleLanguageChange = (language: string) => {
