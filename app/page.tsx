@@ -440,7 +440,7 @@ export default function RoomPage() {
 
   // Cooperation timer functions
   const startCooperationTimer = () => {
-    console.log(`[DEBUG] Starting timer at ${new Date().toISOString()}: 5`)
+    console.log(`[DEBUG] Starting timer at ${new Date().toISOString()}: 10`)
     setCooperationCountdown(5)
     setCooperationTimerActive(true)
     
@@ -473,7 +473,7 @@ export default function RoomPage() {
       cooperationTimerRef.current = null
     }
     setCooperationTimerActive(false)
-    setCooperationCountdown(5)
+    setCooperationCountdown(10)
   }
 
   const handleCooperationTimeout = () => {
