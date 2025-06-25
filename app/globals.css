@@ -132,6 +132,78 @@
   .mobile-spacing-lg {
     @apply space-y-6;
   }
+
+  /* Answer feedback styles */
+  .answer-option {
+    @apply w-full p-4 text-left border rounded-lg transition-all duration-300 ease-in-out;
+    @apply hover:bg-gray-50 hover:border-gray-300;
+    @apply focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .answer-option.correct {
+    background-color: #4CAF50 !important;
+    border-color: #4CAF50 !important;
+    color: white !important;
+  }
+
+  .answer-option.incorrect {
+    background-color: #F44336 !important;
+    border-color: #F44336 !important;
+    color: white !important;
+  }
+
+  .correct-answer-display {
+    @apply mt-3 p-3 rounded-lg border-2 border-green-500 bg-green-50 text-green-800;
+    @apply font-medium text-center;
+    animation: fadeInUp 0.3s ease-out;
+  }
+
+  /* Score animation styles */
+  .score-increase {
+    animation: scoreIncrease 1000ms ease-out;
+  }
+
+  .score-decrease {
+    animation: scoreDecrease 1000ms ease-out;
+  }
+
+  /* Leaderboard styles */
+  .leaderboard-container {
+    @apply fixed top-4 right-4 z-50;
+    @apply bg-white border border-gray-200 rounded-lg shadow-lg;
+    @apply p-4 min-w-[200px] max-w-[280px];
+    @apply mobile-card;
+  }
+
+  .leaderboard-player {
+    @apply flex items-center justify-between py-2 px-3 rounded-md;
+    @apply transition-all duration-300 ease-in-out;
+  }
+
+  .leaderboard-player.current-player {
+    @apply bg-blue-50 border border-blue-200;
+  }
+
+  .player-name {
+    @apply font-medium text-sm truncate flex-1 mr-2;
+  }
+
+  .player-score {
+    @apply font-bold text-sm px-2 py-1 rounded-full;
+    @apply bg-gray-100 text-gray-800;
+    @apply transition-all duration-300 ease-in-out;
+  }
+
+  /* Loading states */
+  .loading-spinner {
+    @apply inline-block w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full;
+    animation: spin 1s linear infinite;
+  }
+
+  .category-loading {
+    @apply opacity-50 pointer-events-none;
+  }
 }
 
 /* Mobile-specific responsive utilities */
@@ -207,6 +279,70 @@
   .mobile-padding-lg {
     @apply px-6 py-6;
   }
+
+  /* Responsive leaderboard positioning */
+  @screen sm {
+    .leaderboard-container {
+      @apply top-6 right-6;
+    }
+  }
+
+  @screen lg {
+    .leaderboard-container {
+      @apply top-8 right-8 min-w-[240px];
+    }
+  }
+}
+
+/* Keyframe animations */
+@keyframes scoreIncrease {
+  0% {
+    background-color: #4CAF50;
+    transform: scale(1);
+  }
+  50% {
+    background-color: #66BB6A;
+    transform: scale(1.05);
+  }
+  100% {
+    background-color: #4CAF50;
+    transform: scale(1);
+  }
+}
+
+@keyframes scoreDecrease {
+  0% {
+    background-color: #F44336;
+    transform: scale(1);
+  }
+  50% {
+    background-color: #EF5350;
+    transform: scale(1.05);
+  }
+  100% {
+    background-color: #F44336;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeInUp {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 /* Mobile-specific media queries */
@@ -246,6 +382,13 @@
   [role="dialog"] {
     margin: 1rem !important;
     max-width: calc(100vw - 2rem) !important;
+  }
+
+  /* Mobile leaderboard adjustments */
+  .leaderboard-container {
+    @apply top-2 right-2 left-2 max-w-none;
+    @apply relative mb-4;
+    position: relative !important;
   }
 }
 
