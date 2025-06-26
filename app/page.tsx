@@ -255,7 +255,7 @@ export default function HomePage() {
             <span className="sm:hidden">Multiplayer language quizzes with friends</span>
           </p>
           
-          {/* Connection Status - Mobile Optimized */}
+          {/* Connection Status - Mobile Optimizeds */}
           <div className="mt-4">
             {connectionStatus === 'connecting' && (
               <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 mobile-text-sm">
