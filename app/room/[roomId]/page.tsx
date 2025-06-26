@@ -707,7 +707,7 @@ export default function RoomPage() {
   }
 
   // Validate categoryId
-  const validCategoryIds = ['animals', 'vehicles', 'foods', 'countries', 'sports']; // Adjust based on known valid categories
+  const validCategoryIds = ['colors', 'animals', 'food', 'vehicles', 'clothing', "sports", "household"]; // Adjust based on known valid categories
   if (!validCategoryIds.includes(cooperationChallenge.categoryId.toLowerCase())) {
     console.warn("⚠️ Invalid categoryId:", cooperationChallenge.categoryId);
     setError("Invalid category received. Please try again.");
