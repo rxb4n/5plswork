@@ -680,12 +680,12 @@ export default function RoomPage() {
     // Validate and sanitize payload
     const usedWords = Array.isArray(room.used_words) ? room.used_words.filter(word => typeof word === 'string') : [];
     const payload = {
-      categoryId: cooperationChallenge.categoryId,
+      category_id: cooperationChallenge.categoryId, // changed
       answer: cooperationAnswer.trim(),
       language: cooperationChallenge.language,
-      usedWords,
-      challengeId: cooperationChallenge.challengeId
+      usedWords: Array.isArray(room?.used_words) ? room.used_words : []
     };
+
 
     if (!payload.categoryId || !payload.language || !payload.challengeId) {
       console.error("❌ Invalid payload fields:", {
