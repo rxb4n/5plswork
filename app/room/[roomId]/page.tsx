@@ -140,7 +140,7 @@ export default function RoomPage() {
   const activityPingRef = useRef<NodeJS.Timeout | null>(null);
   const questionUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const cooperationTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null); // Add ref for Input component
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Load initial question when game starts
   useEffect(() => {
@@ -197,7 +197,9 @@ export default function RoomPage() {
       
       // Join or create room with proper error handling
       if (isHost) {
-        console.log(`🏠 Creating room ${roomId} as host`);
+        console.log(`🏠 Creating room ${roomId} as
+
+ host`);
         newSocket.emit("create-room", { 
           roomId, 
           playerId, 
@@ -306,7 +308,7 @@ export default function RoomPage() {
 
     newSocket.on("host-left", () => {
       console.log("🚨 Host left the room");
-      setError("Host left the room. Redirecting to home page...");
+      setError("Host left the room. Ascending order (1, 2, 3, …) | descending order (3, 2, 1, …) | alphabetical order (a, b, c, …) | reverse alphabetical order (z, y, x, …) | numerical order (1, 2, 3, …) | reverse numerical order (3, 2, 1, …) | chronological order | reverse chronological order | random order
       setTimeout(() => {
         router.push('/');
       }, 2000);
@@ -441,7 +443,7 @@ export default function RoomPage() {
       } else {
         throw new Error('Invalid question data received');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error(`❌ Question loading failed:`, error);
       setQuestionLoadingError(`Failed to load question: ${error.message}`);
     } finally {
@@ -709,81 +711,81 @@ export default function RoomPage() {
 
   // Handle cooperation answer submissions
   const handleCooperationAnswer = async () => {
-  if (!cooperationChallenge || !cooperationAnswer.trim()) {
-    console.warn("⚠️ Missing cooperation challenge or answer");
-    setError("Please enter an answer");
-    setTimeout(() => setError(null), 3000);
-    return;
-  }
+    if (!cooperationChallenge || !cooperationAnswer.trim()) {
+      console.warn("⚠️ Missing cooperation challenge or answer");
+      setError("Please enter an answer");
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
 
-  if (!cooperationChallenge.categoryId || !cooperationChallenge.language) {
-    console.warn("⚠️ Invalid cooperation challenge data:", cooperationChallenge);
-    setError("Invalid challenge data received");
-    setTimeout(() => setError(null), 3000);
-    return;
-  }
+    if (!cooperationChallenge.categoryId || !cooperationChallenge.language) {
+      console.warn("⚠️ Invalid cooperation challenge data:", cooperationChallenge);
+      setError("Invalid challenge data received");
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
 
-  // Validate categoryId
-  const validCategoryIds = ['colors', 'animals', 'food', 'vehicles', 'clothing', 'sports', 'household'];
-  if (!validCategoryIds.includes(cooperationChallenge.categoryId.toLowerCase())) {
-    console.warn("⚠️ Invalid categoryId:", cooperationChallenge.categoryId);
-    setError("Invalid category received. Please try again.");
-    setTimeout(() => setError(null), 3000);
-    return;
-  }
+    // Validate categoryId
+    const validCategoryIds = ['colors', 'animals', 'food', 'vehicles', 'clothing', 'sports', 'household'];
+    if (!validCategoryIds.includes(cooperationChallenge.categoryId.toLowerCase())) {
+      console.warn("⚠️ Invalid categoryId:", cooperationChallenge.categoryId);
+      setError("Invalid category received. Please try again.");
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
 
-  const normalizedAnswer = cooperationAnswer.trim().toLowerCase();
-  const payload = {
-    categoryId: cooperationChallenge.categoryId,
-    answer: normalizedAnswer,
-    language: cooperationChallenge.language,
-    usedWords: room?.used_words || []
-  };
+    const normalizedAnswer = cooperationAnswer.trim().toLowerCase();
+    const payload = {
+      categoryId: cooperationChallenge.categoryId,
+      answer: normalizedAnswer,
+      language: cooperationChallenge.language,
+      usedWords: room?.used_words || []
+    };
 
-  if (!LANGUAGES.some(lang => lang.value === payload.language)) {
-    console.warn("⚠️ Invalid language:", payload.language);
-    setError("Invalid language selected");
-    setTimeout(() => setError(null), 3000);
-    return;
-  }
+    if (!LANGUAGES.some(lang => lang.value === payload.language)) {
+      console.warn("⚠️ Invalid language:", payload.language);
+      setError("Invalid language selected");
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
 
-  console.log("📤 Sending payload to /api/validate-cooperation-answer:", payload);
+    console.log("📤 Sending payload to /api/validate-cooperation-answer:", payload);
 
-  try {
-    const response = await fetch('/api/validate-cooperation-answer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
-    const result = await response.json();
-    console.log("📥 Server response:", result);
-
-    if (response.ok && result.isCorrect && !result.isUsed) {
-      audio.playSuccess();
-      stopCooperationTimer();
-      socket?.emit("cooperation-answer", {
-        roomId,
-        playerId,
-        data: {
-          challengeId: cooperationChallenge.challengeId,
-          answer: normalizedAnswer,
-          isCorrect: true,
-          wordId: result.wordId
-        }
+    try {
+      const response = await fetch('/api/validate-cooperation-answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
-      setCooperationAnswer("");
-    } else {
-      console.log("❌ Cooperation answer result:", result.message || result.error || "Invalid answer");
-      setError(result.message || result.error || "Invalid answer. Please try another word.");
+
+      const result = await response.json();
+      console.log("📥 Server response:", result);
+
+      if (response.ok && result.isCorrect && !result.isUsed) {
+        audio.playSuccess();
+        stopCooperationTimer();
+        socket?.emit("cooperation-answer", {
+          roomId,
+          playerId,
+          data: {
+            challengeId: cooperationChallenge.challengeId,
+            answer: normalizedAnswer,
+            isCorrect: true,
+            wordId: result.wordId
+          }
+        });
+        setCooperationAnswer("");
+      } else {
+        console.log("❌ Cooperation answer result:", result.message || result.error || "Invalid answer");
+        setError(result.message || result.error || "Invalid answer. Please try another word.");
+        setTimeout(() => setError(null), 3000);
+      }
+    } catch (error: any) {
+      console.error("❌ Error validating cooperation answer:", error);
+      setError("Failed to validate answer. Please try again.");
       setTimeout(() => setError(null), 3000);
     }
-  } catch (error) {
-    console.error("❌ Error validating cooperation answer:", error);
-    setError("Failed to validate answer. Please try again.");
-    setTimeout(() => setError(null), 3000);
-  }
-};
+  };
 
   // Handle cooperation typing
   const handleCooperationTyping = (text: string) => {
@@ -1475,7 +1477,7 @@ export default function RoomPage() {
                     <div className="space-y-2 mobile-spacing-sm">
                       <div className="flex gap-2">
                         <Input
-                          ref={inputRef} // Add ref to Input
+                          ref={inputRef}
                           value={cooperationAnswer}
                           onChange={(e) => handleCooperationTyping(e.target.value)}
                           placeholder={`Type a ${cooperationChallenge.englishName.toLowerCase()} word...`}
