@@ -4285,7 +4285,7 @@ export const CATEGORIES: CategoryInfo[] = [
   }
 ];
 
-// Utility functions for the word database
+// Utility functions for the word databases
 export function getWordsByCategory(category: string): WordEntry[] {
   return WORD_DATABASE.filter(word => word.category === category);
 }
