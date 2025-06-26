@@ -690,7 +690,7 @@ export default function RoomPage() {
     window.location.href = "https://oneplswork.onrender.com/";
   };
 
-  // Handle cooperation answer submission
+  // Handle cooperation answer submissions
   const handleCooperationAnswer = async () => {
   if (!cooperationChallenge || !cooperationAnswer.trim()) {
     console.warn("⚠️ Missing cooperation challenge or answer");
