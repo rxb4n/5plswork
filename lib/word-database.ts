@@ -1825,7 +1825,7 @@ export const WORD_DATABASE: WordEntry[] = [
     category: "household",
     isCognate: false,
     difficulty: "medium"
-  }
+  },
   // COLORS (50 words)
   {
     id: "color_001",
