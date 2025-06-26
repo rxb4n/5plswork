@@ -21,12 +21,13 @@ interface AvailableRoom {
 }
 
 const LANGUAGES = [
+  { value: "english", label: "🇬🇧 English" },
   { value: "french", label: "🇫🇷 French" },
   { value: "german", label: "🇩🇪 German" },
   { value: "russian", label: "🇷🇺 Russian" },
   { value: "japanese", label: "🇯🇵 Japanese" },
   { value: "spanish", label: "🇪🇸 Spanish" },
-] as const
+] as const;
 
 export default function HomePage() {
   const [socket, setSocket] = useState<Socket | null>(null)
