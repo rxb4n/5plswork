@@ -4211,7 +4211,6 @@ export const WORD_DATABASE: WordEntry[] = [
     isCognate: true,
     difficulty: "medium"
   },
-  {
     {
       id: "vehicle_049",
       english: "Monorail",
