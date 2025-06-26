@@ -154,6 +154,20 @@ export default function RoomPage() {
     }
   }, [room, currentQuestion, isLoadingQuestion]);
 
+  // Start cooperation timer when conditions are met
+  useEffect(() => {
+    if (
+      room?.game_state === "playing" &&
+      room.game_mode === "cooperation" &&
+      room.current_challenge_player === playerId &&
+      cooperationChallenge &&
+      !cooperationTimerActive
+    ) {
+      console.log("Starting cooperation timer for player", playerId);
+      startCooperationTimer();
+    }
+  }, [room, cooperationChallenge, cooperationTimerActive, playerId]);
+
   // Initialize socket connection
   useEffect(() => {
     if (!roomId || !playerId || !playerName) return
@@ -255,11 +269,7 @@ export default function RoomPage() {
       setIsCooperationWaiting(false)
       setCooperationAnswer("")
       setCooperationTyping(null)
-      
-      // Start cooperation timer when challenge is received
-      if (room?.current_challenge_player === playerId) {
-        startCooperationTimer()
-      }
+      // Removed: Direct timer start moved to useEffect
     })
 
     newSocket.on("cooperation-waiting", ({ isWaiting }: { isWaiting: boolean }) => {
@@ -1515,61 +1525,4 @@ export default function RoomPage() {
             <Card className="mobile-card">
               <CardHeader className="mobile-padding text-center">
                 <CardTitle className="mobile-text-2xl">
-                  {room.game_mode === "cooperation" ? "Game Over!" : "Game Finished!"}
-                </CardTitle>
-                <CardDescription className="mobile-text-lg">
-                  {room.game_mode === "cooperation" 
-                    ? `Final Score: ${room.cooperation_score || 0} words`
-                    : room.winner_id 
-                      ? `${room.players.find(p => p.id === room.winner_id)?.name} wins!`
-                      : "Game completed"
-                  }
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="mobile-spacing-md mobile-padding">
-                {/* Final Scores */}
-                <div className="mobile-spacing-sm">
-                  <h3 className="mobile-text-lg font-semibold mb-3">Final Scores</h3>
-                  {room.players
-                    .sort((a, b) => b.score - a.score)
-                    .map((player, index) => (
-                      <div
-                        key={player.id}
-                        className="flex items-center justify-between p-3 border rounded-lg"
-                      >
-                        <div className="flex items-center gap-3">
-                          {index === 0 && room.game_mode !== "cooperation" && (
-                            <Trophy className="h-5 w-5 text-yellow-600" />
-                          )}
-                          <span className="font-medium mobile-text-base">{player.name}</span>
-                          {player.id === playerId && (
-                            <Badge variant="outline" className="text-xs">You</Badge>
-                          )}
-                        </div>
-                        <Badge variant="outline" className="mobile-text-sm">
-                          {player.score} points
-                        </Badge>
-                      </div>
-                    ))}
-                </div>
-
-                {/* Restart Button (Host Only) */}
-                {isCurrentPlayerHost && (
-                  <div className="flex justify-center">
-                    <SoundButton
-                      onClick={handleRestart}
-                      className="mobile-btn-lg px-8"
-                    >
-                      <RotateCcw className="h-5 w-5 mr-2" />
-                      Play Again
-                    </SoundButton>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
+                  {room.game_mode === "cooperation" ? "Game Over!" : "Game Finished!"
