@@ -259,7 +259,7 @@ export default function RoomPage() {
             console.log("✅ Joined room successfully:", response.room);
             setRoom(response.room);
             setIsLoading(false);
-          };
+          }
         });
       }
     });
@@ -1265,7 +1265,7 @@ export default function RoomPage() {
             {currentQuestion ? (
               <Card className="mobile-card">
                 <CardHeader className="mobile-padding text-center">
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="flex itemscenter justify-between mb-4">
                     <div className="flex items-center gap-2">
                       <Clock className="h-5 w-5 text-blue-600" />
                       <span className={`font-bold text-lg ${timeLeft <= 3 ? 'text-red-600' : 'text-blue-600'}`}>
