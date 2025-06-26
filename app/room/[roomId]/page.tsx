@@ -442,7 +442,7 @@ export default function RoomPage() {
       } else {
         throw new Error('Invalid question data received');
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error(`❌ Question loading failed:`, error);
       setQuestionLoadingError(`Failed to load question: ${error.message}`);
     } finally {
@@ -779,7 +779,7 @@ export default function RoomPage() {
         setError(result.message || result.error || "Invalid answer. Please try another word.");
         setTimeout(() => setError(null), 3000);
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error("❌ Error validating cooperation answer:", error);
       setError("Failed to validate answer. Please try again.");
       setTimeout(() => setError(null), 3000);
@@ -1561,9 +1561,9 @@ export default function RoomPage() {
                       </div>
                     </div>
                   ))}
-                </CardContent>
-              </Card>
-            </div>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         )}
 
