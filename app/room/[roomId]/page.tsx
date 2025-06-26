@@ -529,7 +529,7 @@ export default function RoomPage() {
         answer,
         timeLeft: currentTimeLeft,
         correctAnswer: currentQuestion.correctAnswer,
-        isPracticeMode: room?.game_mode === "practice'
+        isPracticeMode: room?.game_mode === "practice"
       }
     }, (response: any) => {
       if (response.error) {
@@ -575,7 +575,7 @@ export default function RoomPage() {
 
     console.log(`⚡ Player ${playerId} toggling ready status`)
     
-    socket.emit("toggle-ready", { roomId, playerId }, (response: any): any => {
+    socket.emit("toggle-ready", { roomId, playerId }, (response: any) => {
       if (response.error) {
         console.error("❌ Failed to toggle ready:", response.error)
         setError(response.error)
@@ -583,6 +583,8 @@ export default function RoomPage() {
         console.log(`✅ Ready status toggled successfully`)
       }
     })
+  }
+
   // Handle game mode selection
   const handleGameModeChange = (gameMode: string) => {
     if (!socket || !isCurrentPlayerHost) return
@@ -739,16 +741,15 @@ export default function RoomPage() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
         <Card className="w-full max-w-md">
-          <CardContent className="flex flex-col items-center p-8">
+          <CardContent className="flex flex-col items-center justify-center p-8">
             <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
             <h2 className="text-xl font-semibold mb-2">
               {isHost ? 'Creating Room...' : 'Joining Room...'}
             </h2>
             <p className="text-gray-600 text-center">
-              {connectionStatus === 'connecting' ? 'Connecting to server...' : 'Setting up room...' }
+              {connectionStatus === 'connecting' ? 'Connecting to server...' : 'Setting up room...'}
             </p>
-            
-            <div className="mt-4 text-center text-sm text-gray-500">
+            <div className="mt-4 text-sm text-gray-500">
               <p>Room ID: {roomId}</p>
               <p>Player: {decodeURIComponent(playerName || '')}</p>
               <p>Role: {isHost ? 'Host' : 'Player'}</p>
@@ -1424,12 +1425,12 @@ export default function RoomPage() {
                           className="flex-1"
                           onKeyPress={(e) => {
                             if (e.key === 'Enter') {
-                              handleCooperationSubmit()
+                              handleCooperationAnswer()
                             }
                           }}
                         />
                         <SoundButton
-                          onClick={handleCooperationSubmit}
+                          onClick={handleCooperationAnswer}
                           disabled={!cooperationAnswer.trim()}
                           className="mobile-btn-md"
                         >
