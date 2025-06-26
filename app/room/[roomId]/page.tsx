@@ -133,7 +133,7 @@ export default function RoomPage() {
   const [cooperationAnswer, setCooperationAnswer] = useState("");
   const [cooperationTyping, setCooperationTyping] = useState<{ playerId: string; text: string } | null>(null);
   const [isCooperationWaiting, setIsCooperationWaiting] = useState(false);
-  const [cooperationCountdown, setCooperationCountdown] = useState(5);
+  const [cooperationCountdown, setCooperationCountdown] = useState(10);
   const [cooperationTimerActive, setCooperationTimerActive] = useState(false);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -434,8 +434,8 @@ export default function RoomPage() {
 
   // Cooperation timer with proper functionality
   const startCooperationTimer = () => {
-    console.log("Timer started: 5");
-    setCooperationCountdown(5);
+    console.log("Timer started: 10");
+    setCooperationCountdown(10);
     setCooperationTimerActive(true);
     
     if (cooperationTimerRef.current) {
@@ -468,7 +468,7 @@ export default function RoomPage() {
       cooperationTimerRef.current = null;
     }
     setCooperationTimerActive(false);
-    setCooperationCountdown(5);
+    setCooperationCountdown(10);
   };
 
   // Cooperation timeout handler with life reduction and turn switching
