@@ -54,7 +54,7 @@ interface Room {
   players: Player[];
   game_state: "lobby" | "playing" | "finished";
   game_mode: "practice" | "competition" | "cooperation" | null;
-  host_language: "french" | "german" | "russian" | "japanese" | "spanish" | null;
+  host_language: "french" | "german" | "russian" | "japanese" | "spanish" | null;
   winner_id?: string;
   last_activity: Date;
   created_at: Date;
@@ -140,6 +140,7 @@ export default function RoomPage() {
   const activityPingRef = useRef<NodeJS.Timeout | null>(null);
   const questionUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const cooperationTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null); // Add ref for Input component
 
   // Load initial question when game starts
   useEffect(() => {
@@ -264,10 +265,26 @@ export default function RoomPage() {
 
     newSocket.on("cooperation-challenge", ({ challenge }: { challenge: CooperationChallenge }) => {
       console.log("🤝 Cooperation challenge received:", challenge);
+      const validCategoryIds = ['colors', 'animals', 'food', 'vehicles', 'clothing', 'sports', 'household'];
+      if (!validCategoryIds.includes(challenge.categoryId)) {
+        console.warn("⚠️ Received invalid categoryId:", challenge.categoryId);
+        newSocket?.emit("error-report", {
+          roomId,
+          playerId,
+          data: { message: `Invalid categoryId received: ${challenge.categoryId}` }
+        });
+        setError("Invalid category received from server");
+        setTimeout(() => setError(null), 3000);
+        return;
+      }
       setCooperationChallenge(challenge);
       setIsCooperationWaiting(false);
       setCooperationAnswer("");
       setCooperationTyping(null);
+      // Auto-focus input when it's the player's turn
+      if (room?.current_challenge_player === playerId && inputRef.current) {
+        inputRef.current.focus();
+      }
     });
 
     newSocket.on("cooperation-waiting", ({ isWaiting }: { isWaiting: boolean }) => {
@@ -707,7 +724,7 @@ export default function RoomPage() {
   }
 
   // Validate categoryId
-  const validCategoryIds = ['colors', 'animals', 'food', 'vehicles', 'clothing', "sports", "household"];
+  const validCategoryIds = ['colors', 'animals', 'food', 'vehicles', 'clothing', 'sports', 'household'];
   if (!validCategoryIds.includes(cooperationChallenge.categoryId.toLowerCase())) {
     console.warn("⚠️ Invalid categoryId:", cooperationChallenge.categoryId);
     setError("Invalid category received. Please try again.");
@@ -715,7 +732,7 @@ export default function RoomPage() {
     return;
   }
 
-  const normalizedAnswer = cooperationAnswer.trim().toLowerCase(); // Normalize answer to lowercase
+  const normalizedAnswer = cooperationAnswer.trim().toLowerCase();
   const payload = {
     categoryId: cooperationChallenge.categoryId,
     answer: normalizedAnswer,
@@ -755,7 +772,7 @@ export default function RoomPage() {
           wordId: result.wordId
         }
       });
-      setCooperationAnswer(""); // Clear input after successful submission
+      setCooperationAnswer("");
     } else {
       console.log("❌ Cooperation answer result:", result.message || result.error || "Invalid answer");
       setError(result.message || result.error || "Invalid answer. Please try another word.");
@@ -1411,20 +1428,20 @@ export default function RoomPage() {
                       </div>
                       <div className="mobile-text-sm text-gray-600">Score</div>
                     </div>
-                    <div className="text-center">
-                      <div className="mobile-text-2xl font-bold text-red-600">
-                        {"❤️".repeat(room.cooperation_lives || 0)}
-                      </div>
-                      <div className="mobile-text-sm text-gray-600">Lives</div>
-                    </div>
                     {cooperationChallenge && (
-                      <div className="text-center">
+                      <div className="text-center flex-1">
                         <div className={`cooperation-timer font-bold text-lg ${cooperationCountdown <= 2 ? 'warning text-red-600' : 'normal text-blue-600'}`}>
                           {cooperationCountdown}
                         </div>
                         <div className="mobile-text-sm text-gray-600">Timer</div>
                       </div>
                     )}
+                    <div className="text-center">
+                      <div className="mobile-text-2xl font-bold text-red-600">
+                        {"❤️".repeat(room.cooperation_lives || 0)}
+                      </div>
+                      <div className="mobile-text-sm text-gray-600">Lives</div>
+                    </div>
                   </div>
                   <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
                     <HandHeart className="h-3 w-3 mr-1" />
@@ -1458,6 +1475,7 @@ export default function RoomPage() {
                     <div className="space-y-2 mobile-spacing-sm">
                       <div className="flex gap-2">
                         <Input
+                          ref={inputRef} // Add ref to Input
                           value={cooperationAnswer}
                           onChange={(e) => handleCooperationTyping(e.target.value)}
                           placeholder={`Type a ${cooperationChallenge.englishName.toLowerCase()} word...`}
@@ -1542,9 +1560,9 @@ export default function RoomPage() {
                       </div>
                     </div>
                   ))}
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
           </div>
         )}
 
