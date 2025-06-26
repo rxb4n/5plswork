@@ -308,7 +308,7 @@ export default function RoomPage() {
 
     newSocket.on("host-left", () => {
       console.log("🚨 Host left the room");
-      setError("Host left the room. Ascending order (1, 2, 3, …) | descending order (3, 2, 1, …) | alphabetical order (a, b, c, …) | reverse alphabetical order (z, y, x, …) | numerical order (1, 2, 3, …) | reverse numerical order (3, 2, 1, …) | chronological order | reverse chronological order | random order
+      setError("Host left the room. Ascending order (1, 2, 3, …) | descending order (3, 2, 1, …) | alphabetical order (a, b, c, …) | reverse alphabetical order (z, y, x, …) | numerical order (1, 2, 3, …) | reverse numerical order (3, 2, 1, …) | chronological order | reverse chronological order | random order"
       setTimeout(() => {
         router.push('/');
       }, 2000);
