@@ -54,7 +54,7 @@ interface Room {
   players: Player[];
   game_state: "lobby" | "playing" | "finished";
   game_mode: "practice" | "competition" | "cooperation" | null;
-  host_language: "french" | "german" | "russian" | "japanese" | "spanish" | null;
+  host_language: "french" | "german" | "russian" | "japanese" | "spanish" | null;
   winner_id?: string;
   last_activity: Date;
   created_at: Date;
