@@ -2065,7 +2065,6 @@ export const WORD_DATABASE: WordEntry[] = [
     russian: "слоновая кость",
     category: "colors",
     isCognate: false,
-   owały кость",
     category: "colors",
     isCognate: false,
     difficulty: "hard"
