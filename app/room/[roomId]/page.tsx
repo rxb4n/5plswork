@@ -706,9 +706,19 @@ export default function RoomPage() {
     return;
   }
 
+  // Validate categoryId
+  const validCategoryIds = ['animals', 'vehicles', 'foods', 'countries', 'sports']; // Adjust based on known valid categories
+  if (!validCategoryIds.includes(cooperationChallenge.categoryId.toLowerCase())) {
+    console.warn("⚠️ Invalid categoryId:", cooperationChallenge.categoryId);
+    setError("Invalid category received. Please try again.");
+    setTimeout(() => setError(null), 3000);
+    return;
+  }
+
+  const normalizedAnswer = cooperationAnswer.trim().toLowerCase(); // Normalize answer to lowercase
   const payload = {
     categoryId: cooperationChallenge.categoryId,
-    answer: cooperationAnswer.trim(),
+    answer: normalizedAnswer,
     language: cooperationChallenge.language,
     usedWords: room?.used_words || []
   };
@@ -732,7 +742,7 @@ export default function RoomPage() {
     const result = await response.json();
     console.log("📥 Server response:", result);
 
-    if (result.isCorrect && !result.isUsed) {
+    if (response.ok && result.isCorrect && !result.isUsed) {
       audio.playSuccess();
       stopCooperationTimer();
       socket?.emit("cooperation-answer", {
@@ -740,19 +750,20 @@ export default function RoomPage() {
         playerId,
         data: {
           challengeId: cooperationChallenge.challengeId,
-          answer: cooperationAnswer.trim(),
+          answer: normalizedAnswer,
           isCorrect: true,
           wordId: result.wordId
         }
       });
+      setCooperationAnswer(""); // Clear input after successful submission
     } else {
-      console.log("❌ Cooperation answer result:", result.message);
-      setError(result.message || "Invalid answer");
+      console.log("❌ Cooperation answer result:", result.message || result.error || "Invalid answer");
+      setError(result.message || result.error || "Invalid answer. Please try another word.");
       setTimeout(() => setError(null), 3000);
     }
   } catch (error) {
     console.error("❌ Error validating cooperation answer:", error);
-    setError("Failed to validate answer");
+    setError("Failed to validate answer. Please try again.");
     setTimeout(() => setError(null), 3000);
   }
 };
