@@ -1433,7 +1433,7 @@ export default function RoomPage() {
                     <div className="mobile-text-sm text-gray-600">Score</div>
                   </div>
                   {cooperationChallenge && (
-                    <div className="text-center flex-1">
+                    <div className="text-center">
                       <div className={`cooperation-timer font-bold text-lg ${cooperationCountdown <= 2 ? 'warning text-red-600' : 'normal text-blue-600'}`}>
                         {cooperationCountdown}
                       </div>
