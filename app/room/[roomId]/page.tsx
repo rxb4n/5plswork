@@ -140,6 +140,20 @@ export default function RoomPage() {
   const activityPingRef = useRef<NodeJS.Timeout | null>(null);
   const questionUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const cooperationTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus input field in cooperation mode when it's the player's turn
+  useEffect(() => {
+    if (
+      room?.game_state === "playing" &&
+      room.game_mode === "cooperation" &&
+      room.current_challenge_player === playerId &&
+      cooperationChallenge &&
+      inputRef.current
+    ) {
+      inputRef.current.focus();
+    }
+  }, [room, cooperationChallenge, playerId]);
 
   // Load initial question when game starts
   useEffect(() => {
@@ -1426,6 +1440,7 @@ export default function RoomPage() {
                     <div className="space-y-2 mobile-spacing-sm">
                       <div className="flex gap-2">
                         <Input
+                          ref={inputRef}
                           value={cooperationAnswer}
                           onChange={(e) => handleCooperationTyping(e.target.value)}
                           placeholder={`Type a ${cooperationChallenge.englishName.toLowerCase()} word...`}
