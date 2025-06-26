@@ -142,6 +142,18 @@ export default function RoomPage() {
   const questionUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const cooperationTimerRef = useRef<NodeJS.Timeout | null>(null)
 
+  // Load initial question when game starts
+  useEffect(() => {
+    if (
+      room?.game_state === "playing" &&
+      (room.game_mode === "practice" || room.game_mode === "competition") &&
+      !currentQuestion &&
+      !isLoadingQuestion
+    ) {
+      loadQuestion(room);
+    }
+  }, [room, currentQuestion, isLoadingQuestion]);
+
   // Initialize socket connection
   useEffect(() => {
     if (!roomId || !playerId || !playerName) return
@@ -235,22 +247,6 @@ export default function RoomPage() {
     newSocket.on("room-update", ({ room: updatedRoom }: { room: Room }) => {
       console.log("📡 Room updated:", updatedRoom)
       setRoom(updatedRoom)
-      
-      // FIXED: Single question loading trigger with proper debouncing
-      if (updatedRoom.game_state === "playing" && 
-          (updatedRoom.game_mode === "practice" || updatedRoom.game_mode === "competition") &&
-          !currentQuestion && !isLoadingQuestion) {
-        
-        // Clear any existing timeout to prevent duplicates
-        if (questionUpdateTimeoutRef.current) {
-          clearTimeout(questionUpdateTimeoutRef.current)
-        }
-        
-        // Debounce question loading by 300ms
-        questionUpdateTimeoutRef.current = setTimeout(() => {
-          loadQuestion(updatedRoom)
-        }, 300)
-      }
     })
 
     newSocket.on("cooperation-challenge", ({ challenge }: { challenge: CooperationChallenge }) => {
@@ -533,7 +529,7 @@ export default function RoomPage() {
         answer,
         timeLeft: currentTimeLeft,
         correctAnswer: currentQuestion.correctAnswer,
-        isPracticeMode: room?.game_mode === "practice"
+        isPracticeMode: room?.game_mode === "practice'
       }
     }, (response: any) => {
       if (response.error) {
@@ -544,15 +540,11 @@ export default function RoomPage() {
     
     // Reset for next question after delay
     setTimeout(() => {
-      setAnswerFeedback(null)  // Fixed typo: was setShowAnswerFeedback(false)
+      setAnswerFeedback(null)
       setIsAnswering(false)
       setCurrentQuestion(null)
-      
-      // Load next question if still playing
       if (room && (room.game_mode === "practice" || room.game_mode === "competition")) {
-        setTimeout(() => {
-          loadQuestion(room)
-        }, 0)
+        loadQuestion(room)
       }
     }, 1000)
   }
@@ -583,7 +575,7 @@ export default function RoomPage() {
 
     console.log(`⚡ Player ${playerId} toggling ready status`)
     
-    socket.emit("toggle-ready", { roomId, playerId }, (response: any) => {
+    socket.emit("toggle-ready", { roomId, playerId }, (response: any): any => {
       if (response.error) {
         console.error("❌ Failed to toggle ready:", response.error)
         setError(response.error)
@@ -591,8 +583,6 @@ export default function RoomPage() {
         console.log(`✅ Ready status toggled successfully`)
       }
     })
-  }
-
   // Handle game mode selection
   const handleGameModeChange = (gameMode: string) => {
     if (!socket || !isCurrentPlayerHost) return
@@ -691,7 +681,7 @@ export default function RoomPage() {
   }
 
   // Handle cooperation answer submission
-  const handleCooperationSubmit = async () => {
+  const handleCooperationAnswer = async () => {
     if (!cooperationChallenge || !cooperationAnswer.trim()) return
 
     try {
@@ -749,15 +739,16 @@ export default function RoomPage() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
         <Card className="w-full max-w-md">
-          <CardContent className="flex flex-col items-center justify-center p-8">
+          <CardContent className="flex flex-col items-center p-8">
             <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
             <h2 className="text-xl font-semibold mb-2">
               {isHost ? 'Creating Room...' : 'Joining Room...'}
             </h2>
             <p className="text-gray-600 text-center">
-              {connectionStatus === 'connecting' ? 'Connecting to server...' : 'Setting up room...'}
+              {connectionStatus === 'connecting' ? 'Connecting to server...' : 'Setting up room...' }
             </p>
-            <div className="mt-4 text-sm text-gray-500">
+            
+            <div className="mt-4 text-center text-sm text-gray-500">
               <p>Room ID: {roomId}</p>
               <p>Player: {decodeURIComponent(playerName || '')}</p>
               <p>Role: {isHost ? 'Host' : 'Player'}</p>
