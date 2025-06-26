@@ -155,7 +155,7 @@ export default function RoomPage() {
     }
   }, [room, currentQuestion, isLoadingQuestion]);
 
-  // Start cooperation timer when conditions are met
+  // Start cooperation timer and focus input when conditions are met
   useEffect(() => {
     if (
       room?.game_state === "playing" &&
@@ -166,6 +166,10 @@ export default function RoomPage() {
     ) {
       console.log("Starting cooperation timer for player", playerId);
       startCooperationTimer();
+      // Auto-focus input when it's the player's turn
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
     }
   }, [room, cooperationChallenge, cooperationTimerActive, playerId]);
 
@@ -1422,32 +1426,26 @@ export default function RoomPage() {
             <Card className="mobile-card">
               <CardContent className="mobile-padding">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="text-center">
-                      <div className="mobile-text-2xl font-bold text-purple-600">
-                        {room.cooperation_score || 0}
-                      </div>
-                      <div className="mobile-text-sm text-gray-600">Score</div>
+                  <div className="text-center">
+                    <div className="mobile-text-2xl font-bold text-purple-600">
+                      {room.cooperation_score || 0}
                     </div>
-                    {cooperationChallenge && (
-                      <div className="text-center flex-1">
-                        <div className={`cooperation-timer font-bold text-lg ${cooperationCountdown <= 2 ? 'warning text-red-600' : 'normal text-blue-600'}`}>
-                          {cooperationCountdown}
-                        </div>
-                        <div className="mobile-text-sm text-gray-600">Timer</div>
-                      </div>
-                    )}
-                    <div className="text-center">
-                      <div className="mobile-text-2xl font-bold text-red-600">
-                        {"❤️".repeat(room.cooperation_lives || 0)}
-                      </div>
-                      <div className="mobile-text-sm text-gray-600">Lives</div>
-                    </div>
+                    <div className="mobile-text-sm text-gray-600">Score</div>
                   </div>
-                  <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
-                    <HandHeart className="h-3 w-3 mr-1" />
-                    Cooperation
-                  </Badge>
+                  {cooperationChallenge && (
+                    <div className="text-center flex-1">
+                      <div className={`cooperation-timer font-bold text-lg ${cooperationCountdown <= 2 ? 'warning text-red-600' : 'normal text-blue-600'}`}>
+                        {cooperationCountdown}
+                      </div>
+                      <div className="mobile-text-sm text-gray-600">Timer</div>
+                    </div>
+                  )}
+                  <div className="text-center">
+                    <div className="mobile-text-2xl font-bold text-red-600">
+                      {"❤️".repeat(room.cooperation_lives || 0)}
+                    </div>
+                    <div className="mobile-text-sm text-gray-600">Lives</div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -1561,9 +1559,9 @@ export default function RoomPage() {
                       </div>
                     </div>
                   ))}
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
           </div>
         )}
 
