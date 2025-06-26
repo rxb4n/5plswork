@@ -881,7 +881,7 @@ export default function RoomPage() {
           </Card>
         )}
 
-        {/* Question Loading Error */}
+        {/* Question Loading Errors */}
         {questionLoadingError && (
           <Card className="mb-6 border-orange-200 bg-orange-50">
             <CardContent className="p-4">
