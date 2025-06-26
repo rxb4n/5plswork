@@ -4236,7 +4236,6 @@ export const WORD_DATABASE: WordEntry[] = [
     isCognate: false,
     difficulty: "hard"
   }
-]
 ];
 
 // Category information
