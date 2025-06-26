@@ -17,7 +17,7 @@ interface AvailableRoom {
   status: "waiting"
   targetScore: number
   gameMode?: "practice" | "competition" | "cooperation" | null
-  hostLanguage?: "french" | "german" | "russian" | "japanese" | "spanish" | null
+  hostLanguage?: "french" | "german" | "russian" | "japanese" | "spanish" | "english" | null
 }
 
 const LANGUAGES = [
