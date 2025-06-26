@@ -269,7 +269,6 @@ export default function RoomPage() {
       setIsCooperationWaiting(false)
       setCooperationAnswer("")
       setCooperationTyping(null)
-      // Removed: Direct timer start moved to useEffect
     })
 
     newSocket.on("cooperation-waiting", ({ isWaiting }: { isWaiting: boolean }) => {
@@ -868,67 +867,81 @@ export default function RoomPage() {
               
               {/* Players List */}
               <Card className="mobile-card">
-                <CardHeader className="mobile-padding">
+                <CardHeader className="flex">
+                  <CardTitle className="flex items-center gap-                    <Users className="h-5 w-                    <span>Players ({room.players.length}/{room.game_mode === "cooperation" ? 2 : 8})</span>
                   <CardTitle className="flex items-center gap-2 mobile-text-lg">
                     <Users className="h-5 w-5" />
-                    Players ({room.players.length}/{room.game_mode === "cooperation" ? 2 : 8})
+                    <span>Players ({room.players.length}/{room.game_mode === "cooperation" ? 2 : 8})</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="mobile-spacing-sm mobile-padding">
-                  {room.players.map((player) => (
-                    <div
-                      key={player.id}
-                      className="flex items-center justify-between p-3 border rounded-lg"
-                    >
-                      <div className="flex items-center gap-3">
+                  <CardContent className="space-y-2 mobile-spacing-sm">
+                    {room.players.map((player) => (
+                      <div
+                        key={player.id}
+                        className="flex items-center justify-between p-3"
+                        className="flex items-center justify-between p-3 border rounded-lg"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            {player.is_host && <Crown className="h-4 w-4 text-yellow-600" />}
+                            <span className="font-medium mobile-text-base">{player.name}</span>
+                            {player.id === playerId && (
+                              <span className="badge badge-outline badge-sm">You</span>
+                              <Badge variant="outline" className="text-xs">You</Badge>
+                            )}
+                          </div>
+                        </div>
+                        
                         <div className="flex items-center gap-2">
-                          {player.is_host && <Crown className="h-4 w-4 text-yellow-600" />}
-                          <span className="font-medium mobile-text-base">{player.name}</span>
-                          {player.id === playerId && (
-                            <Badge variant="outline" className="text-xs">You</Badge>
-                          )}
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        {player.language && (
-                          <Badge variant="outline" className="text-xs">
-                            {LANGUAGES.find(l => l.value === player.language)?.label}
-                          </Badge>
-                        )}
-                        <div className="flex items-center gap-1">
-                          {player.ready ? (
-                            <Badge variant="default" className="text-xs bg-green-600 text-white">
-                              <Check className="h-3 w-3 mr-1" />
-                              Ready
-                            </Badge>
-                          ) : (
+                          {player.language && (
+                            <span className="badge badge-outline badge-xs">{languages.find(l => l.value === player.language)?.label}</span>
                             <Badge variant="outline" className="text-xs">
-                              <X className="h-3 w-3 mr-1" />
-                              Not Ready
+                              {LANGUAGES.find(l => l.value === player.language)?.label}
                             </Badge>
                           )}
+                          <div className="flex items-center gap-1">
+                            {player.ready ? (
+                              <span className="badge badge-success badge-sm">
+                                <CheckIcon className="mr-1 h-3 w-3" />
+                                Ready
+                              </span>
+                              <Badge variant="default" className="text-xs bg-green-600 text-white">
+                                <Check className="h-3 w-3 mr-1" />
+                                Ready
+                              </Badge>
+                            ) : (
+                              <span className="badge badge-outline badge-sm">
+                                <XIcon className="mr-1 h-3 w-3" />
+                                Not Ready
+                              </span>
+                              <Badge variant="outline" className="text-xs">
+                                <X className="h-3 w-3 mr-1" />
+                                Not Ready
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </CardContent>
               </Card>
 
               {/* Game Mode Selection */}
               {isCurrentPlayerHost && !room.game_mode && (
                 <Card className="mobile-card">
-                  <CardHeader className="mobile-padding">
+                  <CardHeader className="mobile-header">
                     <CardTitle className="mobile-text-lg">Select Game Mode</CardTitle>
                     <CardDescription className="mobile-text-base">
                       Choose how you want to play
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="mobile-spacing-md mobile-padding">
-                    <div className="mobile-spacing-sm">
+                  <CardContent className="space-y-4 mobile-spacing-md">
+                    <div className="space-y-2 mobile-spacing-sm">
                       <SoundButton
                         onClick={() => handleGameModeChange("practice")}
-                        variant="outline"
+                        variant="outline" 
                         className="w-full mobile-btn-lg justify-start"
                       >
                         <BookOpen className="h-5 w-5 mr-3 text-blue-600" />
@@ -941,6 +954,7 @@ export default function RoomPage() {
                       <SoundButton
                         onClick={() => handleGameModeChange("competition")}
                         variant="outline"
+                        className="w-full mt-2 mobile-btn-lg justify-start"
                         className="w-full mobile-btn-lg justify-start"
                       >
                         <Zap className="h-5 w-5 mr-3 text-orange-600" />
@@ -953,6 +967,7 @@ export default function RoomPage() {
                       <SoundButton
                         onClick={() => handleGameModeChange("cooperation")}
                         variant="outline"
+                        className="w-full mt-2 mobile-btn-lg justify-start"
                         className="w-full mobile-btn-lg justify-start"
                       >
                         <HandHeart className="h-5 w-5 mr-3 text-purple-600" />
@@ -969,30 +984,42 @@ export default function RoomPage() {
               {/* Game Settings */}
               {room.game_mode && (
                 <Card className="mobile-card">
-                  <CardHeader className="mobile-padding">
+                  <CardHeader className="mobile-header">
                     <CardTitle className="flex items-center gap-2 mobile-text-lg">
                       <Settings className="h-5 w-5" />
                       Game Settings
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="mobile-spacing-md mobile-padding">
+                  <CardContent className="space-y-4 mobile-spacing-md">
                     {/* Current Game Mode */}
                     <div className="flex items-center justify-between">
                       <span className="mobile-text-base font-medium">Game Mode:</span>
                       <div className="flex items-center gap-2">
                         {room.game_mode === "practice" && (
+                          <span className="badge badge-outline bg-blue-50 text-blue-700 border-blue-200">
+                            <BookOpenIcon className="mr-1 h-3 w-3" />
+                            Practice
+                          </span>
                           <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
                             <BookOpen className="h-3 w-3 mr-1" />
                             Practice
                           </Badge>
                         )}
                         {room.game_mode === "competition" && (
+                          <span className="badge badge-outline bg-orange-50 text-orange-700 border-orange-200">
+                            <ZapIcon className="mr-1 h-3 w-3" />
+                            Competition
+                          </span>
                           <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
                             <Zap className="h-3 w-3 mr-1" />
                             Competition
                           </Badge>
                         )}
                         {room.game_mode === "cooperation" && (
+                          <span className="badge badge-outline bg-purple-50 text-purple-700 border-purple-200">
+                            <HandHeartIcon className="mr-1 h-3 w-3" />
+                            Cooperation
+                          </span>
                           <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
                             <HandHeart className="h-3 w-3 mr-1" />
                             Cooperation
@@ -1000,7 +1027,7 @@ export default function RoomPage() {
                         )}
                         {isCurrentPlayerHost && (
                           <SoundButton
-                            onClick={() => handleGameModeChange(null)}
+                            onClick={() => handleGameModeChange("")}
                             variant="outline"
                             size="sm"
                           >
@@ -1027,6 +1054,10 @@ export default function RoomPage() {
                           </SelectContent>
                         </Select>
                       ) : (
+                        <span className="badge badge-outline">
+                          <TargetIcon className="mr-1 h-3 w-3" />
+                          {room.target_score}
+                        </span>
                         <Badge variant="outline">
                           <Target className="h-3 w-3 mr-1" />
                           {room.target_score}
@@ -1052,6 +1083,10 @@ export default function RoomPage() {
                             </SelectContent>
                           </Select>
                         ) : (
+                          <span className="badge badge-outline">
+                            <GlobeIcon className="mr-1 h-3 w-3" />
+                            {room.host_language ? languages.find(l => l.value === room.host_language)?.label : "Not set"}
+                          </span>
                           <Badge variant="outline">
                             <Globe className="h-3 w-3 mr-1" />
                             {room.host_language ? LANGUAGES.find(l => l.value === room.host_language)?.label : "Not set"}
@@ -1059,14 +1094,15 @@ export default function RoomPage() {
                         )}
                       </div>
                     )}
-                  </CardContent>
-                </Card>
+                  </div>
+                </CardContent>
+              </Card>
               )}
 
               {/* Language Selection (Practice/Cooperation Mode) */}
               {(room.game_mode === "practice" || room.game_mode === "cooperation") && (
                 <Card className="mobile-card">
-                  <CardHeader className="mobile-padding">
+                  <CardHeader className="mobile-header">
                     <CardTitle className="mobile-text-lg">Select Your Language</CardTitle>
                     <CardDescription className="mobile-text-base">
                       Choose the language you want to practice
@@ -1136,13 +1172,13 @@ export default function RoomPage() {
             {/* Rules Section */}
             <div className="lg:col-span-1">
               <Card className="mobile-card">
-                <CardHeader className="mobile-padding">
+                <CardHeader className="mobile-header">
                   <CardTitle className="mobile-text-lg">Game Rules</CardTitle>
                 </CardHeader>
-                <CardContent className="mobile-spacing-sm mobile-text-sm mobile-padding">
-                  <div className="mobile-spacing-sm">
+                <CardContent className="space-y-4 mobile-spacing-sm mobile-text-sm">
+                  <div className="space-y-2 mobile-spacing-sm">
                     <p className="font-medium mobile-text-base">🎯 Game Modes:</p>
-                    <div className="mobile-spacing-sm ml-4">
+                    <div className="space-y-2 mobile-spacing-sm ml-4">
                       <div className="flex items-start gap-2">
                         <BookOpen className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
                         <div className="min-w-0">
@@ -1167,9 +1203,9 @@ export default function RoomPage() {
                     </div>
                   </div>
 
-                  <div className="mobile-spacing-sm">
+                  <div className="space-y-2 mobile-spacing-sm">
                     <p className="font-medium mobile-text-base">🎮 How to Play:</p>
-                    <ul className="mobile-spacing-sm text-gray-600 ml-4">
+                    <ul className="space-y-1 mobile-spacing-sm text-gray-600 ml-4">
                       <li className="mobile-text-sm">• Choose your game mode and language</li>
                       <li className="mobile-text-sm">• Translate English words correctly</li>
                       <li className="mobile-text-sm">• Earn points for correct answers</li>
@@ -1177,10 +1213,13 @@ export default function RoomPage() {
                     </ul>
                   </div>
 
-                  <div className="mobile-spacing-sm">
+                  <div className="space-y-2 mobile-spacing-sm">
                     <p className="font-medium mobile-text-base">🌍 Languages:</p>
-                    <div className="mobile-flex-wrap">
+                    <div className="flex flex-wrap gap-2 mobile-flex-wrap">
                       {["French", "German", "Russian", "Japanese", "Spanish"].map((lang) => (
+                        <span key={lang} className="badge badge-outline mobile-text-sm">
+                          {lang}
+                        </span>
                         <Badge key={lang} variant="outline" className="mobile-text-sm">
                           {lang}
                         </Badge>
@@ -1189,9 +1228,9 @@ export default function RoomPage() {
                   </div>
 
                   {connectionStatus === 'error' && (
-                    <div className="mobile-spacing-sm mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
+                    <div className="space-y-2 mobile-spacing-sm mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
                       <p className="font-medium text-red-700 mobile-text-sm">🔧 Connection Issues?</p>
-                      <ul className="mobile-spacing-sm text-red-600 mobile-text-sm ml-4">
+                      <ul className="space-y-1 mobile-spacing-sm text-red-600 mobile-text-sm ml-4">
                         <li>• Try refreshing the page</li>
                         <li>• Check your internet connection</li>
                         <li>• Disable ad blockers if any</li>
@@ -1200,7 +1239,8 @@ export default function RoomPage() {
                       </ul>
                     </div>
                   )}
-                </CardContent>
+                </div>
+              </CardContent>
               </Card>
             </div>
           </div>
@@ -1212,6 +1252,31 @@ export default function RoomPage() {
             {/* Game Header */}
             <div className="text-center">
               <div className="flex items-center justify-center gap-4 mb-4">
+                <span className="badge badge-outline" className={
+                  room.game_mode === "practice" 
+                    ? "bg-blue-50 text-blue-700 border-blue-200"
+                    : "bg-orange-50 text-orange-700 border-orange-200"
+                }>
+                  {room.game_mode === "practice" ? (
+                    <>
+                      <BookOpenIcon className="mr-1 h-3 w-3" />
+                      Practice Mode
+                    </>
+                    <>
+                      <BookOpen className="h-3 w-3 mr-1" />
+                      Practice Mode
+                    </>
+                  ) : (
+                    <>
+                      <ZapIcon className="mr-1 h-3 w-3" />
+                      Competition Mode
+                    </>
+                    <>
+                      <Zap className="h-3 w-3 mr-1" />
+                      Competition Mode
+                    </>
+                  )}
+                </span>
                 <Badge variant="outline" className={
                   room.game_mode === "practice" 
                     ? "bg-blue-50 text-blue-700 border-blue-200"
@@ -1229,6 +1294,10 @@ export default function RoomPage() {
                     </>
                   )}
                 </Badge>
+                <span className="badge badge-outline">
+                  <TargetIcon className="mr-1 h-3 w-3" />
+                  Target: {room.target_score}
+                </span>
                 <Badge variant="outline">
                   <Target className="h-3 w-3 mr-1" />
                   Target: {room.target_score}
@@ -1239,7 +1308,7 @@ export default function RoomPage() {
             {/* Question Section */}
             {currentQuestion ? (
               <Card className="mobile-card">
-                <CardHeader className="mobile-padding text-center">
+                <CardHeader className="mobile-header text-center">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                       <Clock className="h-5 w-5 text-blue-600" />
@@ -1257,6 +1326,10 @@ export default function RoomPage() {
                   <CardDescription className="mobile-text-base">
                     Choose the correct translation in{" "}
                     <strong>
+                      {room.game_mode === "practice" 
+                        ? languages.find(l => l.value === currentPlayer?.language)?.label
+                        : languages.find(l => l.value === room.host_language)?.label
+                      }
                       {room.game_mode === "practice" 
                         ? LANGUAGES.find(l => l.value === currentPlayer?.language)?.label
                         : LANGUAGES.find(l => l.value === room.host_language)?.label
@@ -1303,7 +1376,7 @@ export default function RoomPage() {
                   </div>
 
                   {answerFeedback?.show && (
-                    <div className="correct-answer-display">
+                    <div className="correct-answer-display mt-4 text-center">
                       {answerFeedback.isCorrect ? (
                         <span>✅ Correct! Well done!</span>
                       ) : answerFeedback.selectedAnswer ? (
@@ -1342,23 +1415,27 @@ export default function RoomPage() {
                   .map((player, index) => (
                     <div
                       key={player.id}
-                      className={`leaderboard-player ${player.id === playerId ? 'current-player' : ''}`}
+                      className={`leaderboard-player flex items-center justify-between p-3 border rounded-lg ${player.id === playerId ? 'current-player bg-blue-50' : ''}`}
                     >
                       <div className="flex items-center gap-3">
                         <div className="flex items-center gap-2">
                           {index === 0 && <Trophy className="h-4 w-4 text-yellow-600" />}
-                          <span className="player-name">{player.name}</span>
+                          <span className="player-name font-medium mobile-text-base">{player.name}</span>
                           {player.id === playerId && (
+                            <span className="badge badge-outline badge-xs">You</span>
                             <Badge variant="outline" className="text-xs">You</Badge>
                           )}
                         </div>
                         {player.language && (
+                          <span className="badge badge-outline badge-xs">
+                            {languages.find(l => l.value === player.language)?.label}
+                          </span>
                           <Badge variant="outline" className="text-xs">
                             {LANGUAGES.find(l => l.value === player.language)?.label}
                           </Badge>
                         )}
                       </div>
-                      <div className="player-score">
+                      <div className="player-score font-medium mobile-text-base">
                         {player.score}
                       </div>
                     </div>
@@ -1370,7 +1447,7 @@ export default function RoomPage() {
 
         {/* Cooperation Mode Gameplay */}
         {room.game_state === "playing" && room.game_mode === "cooperation" && (
-          <div className="mobile-spacing-md">
+          <div className="space-y-6 mobile-spacing-md">
             {/* Cooperation Stats */}
             <Card className="mobile-card">
               <CardContent className="mobile-padding">
@@ -1390,13 +1467,17 @@ export default function RoomPage() {
                     </div>
                     {cooperationChallenge && (
                       <div className="text-center">
-                        <div className={`cooperation-timer ${cooperationCountdown <= 2 ? 'warning' : 'normal'}`}>
+                        <div className={`cooperation-timer font-bold text-lg ${cooperationCountdown <= 2 ? 'warning text-red-600' : 'normal text-blue-600'}`}>
                           {cooperationCountdown}
                         </div>
                         <div className="mobile-text-sm text-gray-600">Timer</div>
                       </div>
                     )}
                   </div>
+                  <span className="badge badge-outline bg-purple-50 text-purple-700 border-purple-200">
+                    <HandHeartIcon className="mr-1 h-3 w-3" />
+                    Cooperation
+                  </span>
                   <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
                     <HandHeart className="h-3 w-3 mr-1" />
                     Cooperation
@@ -1416,17 +1497,18 @@ export default function RoomPage() {
               </Card>
             ) : cooperationChallenge ? (
               <Card className="mobile-card">
-                <CardHeader className="mobile-padding">
+                <CardHeader className="mobile-header">
                   <CardTitle className="mobile-text-lg">
                     Category: {cooperationChallenge.categoryName}
                   </CardTitle>
                   <CardDescription className="mobile-text-base">
+                    Type a word in <strong>{languages.find(l => l.value === cooperationChallenge.language)?.label}</strong> that belongs to this category
                     Type a word in <strong>{LANGUAGES.find(l => l.value === cooperationChallenge.language)?.label}</strong> that belongs to this category
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="mobile-spacing-md mobile-padding">
+                <CardContent className="space-y-4 mobile-spacing-md">
                   {room.current_challenge_player === playerId ? (
-                    <div className="mobile-spacing-sm">
+                    <div className="space-y-2 mobile-spacing-sm">
                       <div className="flex gap-2">
                         <Input
                           value={cooperationAnswer}
@@ -1452,7 +1534,7 @@ export default function RoomPage() {
                       </p>
                     </div>
                   ) : (
-                    <div className="mobile-spacing-sm">
+                    <div className="space-y-2 mobile-spacing-sm">
                       <div className="p-4 bg-gray-50 rounded-lg border">
                         <p className="mobile-text-base text-gray-600 text-center">
                           Waiting for {room.players.find(p => p.id === room.current_challenge_player)?.name} to answer...
@@ -1465,7 +1547,8 @@ export default function RoomPage() {
                       </div>
                     </div>
                   )}
-                </CardContent>
+                </div>
+              </CardContent>
               </Card>
             ) : (
               <Card className="mobile-card">
@@ -1479,7 +1562,7 @@ export default function RoomPage() {
 
             {/* Players Display at Bottom */}
             <Card className="mobile-card">
-              <CardHeader className="mobile-padding">
+              <CardHeader className="mobile-header">
                 <CardTitle className="mobile-text-lg">Players & Languages</CardTitle>
               </CardHeader>
               <CardContent className="mobile-padding">
@@ -1497,15 +1580,20 @@ export default function RoomPage() {
                         <div className="flex items-center gap-2">
                           <span className="font-medium mobile-text-base">{player.name}</span>
                           {player.id === playerId && (
+                            <span className="badge badge-outline badge-xs">You</span>
                             <Badge variant="outline" className="text-xs">You</Badge>
                           )}
                           {room.current_challenge_player === player.id && (
+                            <span className="badge badge-primary badge-xs">Current Turn</span>
                             <Badge variant="default" className="text-xs bg-blue-600 text-white">
                               Current Turn
                             </Badge>
                           )}
                         </div>
                         {player.language && (
+                          <span className="badge badge-outline badge-xs">
+                            {languages.find(l => l.value === player.language)?.label}
+                          </span>
                           <Badge variant="outline" className="text-xs">
                             {LANGUAGES.find(l => l.value === player.language)?.label}
                           </Badge>
@@ -1521,8 +1609,70 @@ export default function RoomPage() {
 
         {/* Game Finished */}
         {room.game_state === "finished" && (
-          <div className="mobile-spacing-md">
+          <div className="space-y-6 mobile-spacing-md">
             <Card className="mobile-card">
-              <CardHeader className="mobile-padding text-center">
+              <CardHeader className="mobile-header text-center">
                 <CardTitle className="mobile-text-2xl">
-                  {room.game_mode === "cooperation" ? "Game Over!" : "Game Finished!"
+                  {room.game_mode === "cooperation" ? "Game Over!" : "Game Finished!"}
+                </CardTitle>
+                <CardDescription className="mobile-text-lg">
+                  {room.game_mode === "cooperation" 
+                    ? `Final Score: ${room.cooperation_score || 0} words`
+                    : room.winner_id 
+                      ? `${room.players.find(p => p.id === room.winner_id)?.name} wins!`
+                      : "Game completed"
+                  }
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4 mobile-spacing-md">
+                {/* Final Scores */}
+                <div className="space-y-2 mobile-spacing-sm">
+                  <h3 className="mobile-text-lg font-semibold mb-3">Final Scores</h3>
+                  {room.players
+                    .sort((a, b) => b.score - a.score)
+                    .map((player, index) => (
+                      <div
+                        key={player.id}
+                        className="flex items-center justify-between p-3 border rounded-lg"
+                      >
+                        <div className="flex items-center gap-3">
+                          {index === 0 && room.game_mode !== "cooperation" && (
+                            <Trophy className="h-5 w-5 text-yellow-600" />
+                          )}
+                          <span className="font-medium mobile-text-base">{player.name}</span>
+                          {player.id === playerId && (
+                            <span className="badge badge-outline badge-xs">You</span>
+                            <Badge variant="outline" className="text-xs">You</Badge>
+                          )}
+                        </div>
+                        <span className="badge badge-outline mobile-text-sm">
+                          {player.score} points
+                        </span>
+                        <Badge variant="outline" className="mobile-text-sm">
+                          {player.score} points
+                        </Badge>
+                      </div>
+                    ))}
+                </div>
+
+                {/* Restart Button (Host Only) */}
+                {isCurrentPlayerHost && (
+                  <div className="flex justify-center">
+                    <SoundButton
+                      onClick={handleRestart}
+                      className="mobile-btn-lg px-8"
+                    >
+                      <RotateCcw className="h-5 w-5 mr-2" />
+                      Play Again
+                    </SoundButton>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+            </Card>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
