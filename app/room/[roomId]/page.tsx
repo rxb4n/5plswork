@@ -197,9 +197,7 @@ export default function RoomPage() {
       
       // Join or create room with proper error handling
       if (isHost) {
-        console.log(`🏠 Creating room ${roomId} as
-
- host`);
+        console.log(`🏠 Creating room ${roomId} as host`);
         newSocket.emit("create-room", { 
           roomId, 
           playerId, 
@@ -308,7 +306,7 @@ export default function RoomPage() {
 
     newSocket.on("host-left", () => {
       console.log("🚨 Host left the room");
-      setError("Host left the room. Ascending order (1, 2, 3, …) | descending order (3, 2, 1, …) | alphabetical order (a, b, c, …) | reverse alphabetical order (z, y, x, …) | numerical order (1, 2, 3, …) | reverse numerical order (3, 2, 1, …) | chronological order | reverse chronological order | random order"
+      setError("Host left the room. Redirecting to home page...");
       setTimeout(() => {
         router.push('/');
       }, 2000);
