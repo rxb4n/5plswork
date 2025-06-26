@@ -104,7 +104,6 @@ export default function RoomPage() {
       console.error('❌ Missing required parameters:', { roomId, playerId, playerName });
       alert('Missing required parameters. Redirecting to home page.');
       router.push('/');
-      return;
     }
   }, [roomId, playerId, playerName, router]);
 
@@ -1511,9 +1510,9 @@ export default function RoomPage() {
                       </div>
                     </div>
                   ))}
-                </CardContent>
-              </Card>
-            </div>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         )}
 
