@@ -692,49 +692,70 @@ export default function RoomPage() {
 
   // Handle cooperation answer submission
   const handleCooperationAnswer = async () => {
-    if (!cooperationChallenge || !cooperationAnswer.trim()) return;
+  if (!cooperationChallenge || !cooperationAnswer.trim()) {
+    console.warn("⚠️ Missing cooperation challenge or answer");
+    setError("Please enter an answer");
+    setTimeout(() => setError(null), 3000);
+    return;
+  }
 
-    try {
-      const response = await fetch('/api/validate-cooperation-answer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          categoryId: cooperationChallenge.categoryId,
+  if (!cooperationChallenge.categoryId || !cooperationChallenge.language) {
+    console.warn("⚠️ Invalid cooperation challenge data:", cooperationChallenge);
+    setError("Invalid challenge data received");
+    setTimeout(() => setError(null), 3000);
+    return;
+  }
+
+  const payload = {
+    categoryId: cooperationChallenge.categoryId,
+    answer: cooperationAnswer.trim(),
+    language: cooperationChallenge.language,
+    usedWords: room?.used_words || []
+  };
+
+  if (!LANGUAGES.some(lang => lang.value === payload.language)) {
+    console.warn("⚠️ Invalid language:", payload.language);
+    setError("Invalid language selected");
+    setTimeout(() => setError(null), 3000);
+    return;
+  }
+
+  console.log("📤 Sending payload to /api/validate-cooperation-answer:", payload);
+
+  try {
+    const response = await fetch('/api/validate-cooperation-answer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const result = await response.json();
+    console.log("📥 Server response:", result);
+
+    if (result.isCorrect && !result.isUsed) {
+      audio.playSuccess();
+      stopCooperationTimer();
+      socket?.emit("cooperation-answer", {
+        roomId,
+        playerId,
+        data: {
+          challengeId: cooperationChallenge.challengeId,
           answer: cooperationAnswer.trim(),
-          language: cooperationChallenge.language,
-          usedWords: room?.used_words || []
-        })
+          isCorrect: true,
+          wordId: result.wordId
+        }
       });
-
-      const result = await response.json();
-
-      if (result.isCorrect && !result.isUsed) {
-        // Correct answer
-        audio.playSuccess();
-        stopCooperationTimer();
-        
-        socket?.emit("cooperation-answer", {
-          roomId,
-          playerId,
-          data: {
-            challengeId: cooperationChallenge.challengeId,
-            answer: cooperationAnswer.trim(),
-            isCorrect: true,
-            wordId: result.wordId
-          }
-        });
-      } else {
-        // Wrong answer or already used
-        console.log("❌ Cooperation answer result:", result.message);
-        setError(result.message);
-        setTimeout(() => setError(null), 3000);
-      }
-    } catch (error) {
-      console.error("❌ Error validating cooperation answer:", error);
-      setError("Failed to validate answer");
+    } else {
+      console.log("❌ Cooperation answer result:", result.message);
+      setError(result.message || "Invalid answer");
       setTimeout(() => setError(null), 3000);
     }
-  };
+  } catch (error) {
+    console.error("❌ Error validating cooperation answer:", error);
+    setError("Failed to validate answer");
+    setTimeout(() => setError(null), 3000);
+  }
+};
 
   // Handle cooperation typing
   const handleCooperationTyping = (text: string) => {
