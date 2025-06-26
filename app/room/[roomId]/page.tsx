@@ -92,13 +92,11 @@ export default function RoomPage() {
   const router = useRouter();
   const audio = useAudio();
   
-  // Extract parameters from URL
   const roomId = params.roomId as string;
   const playerId = searchParams.get('playerId');
   const playerName = searchParams.get('name');
   const isHost = searchParams.get('isHost') === 'true';
 
-  // Validate required parameters
   useEffect(() => {
     if (!roomId || !playerId || !playerName) {
       console.error('❌ Missing required parameters:', { roomId, playerId, playerName });
@@ -113,7 +111,6 @@ export default function RoomPage() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Game state
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<string>("");
   const [timeLeft, setTimeLeft] = useState(10);
@@ -128,7 +125,6 @@ export default function RoomPage() {
     selectedAnswer: string;
   } | null>(null);
 
-  // Cooperation mode state
   const [cooperationChallenge, setCooperationChallenge] = useState<CooperationChallenge | null>(null);
   const [cooperationAnswer, setCooperationAnswer] = useState("");
   const [cooperationTyping, setCooperationTyping] = useState<{ playerId: string; text: string } | null>(null);
@@ -142,7 +138,6 @@ export default function RoomPage() {
   const cooperationTimerRef = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-focus input field in cooperation mode when it's the player's turn
   useEffect(() => {
     if (
       room?.game_state === "playing" &&
@@ -155,7 +150,6 @@ export default function RoomPage() {
     }
   }, [room, cooperationChallenge, playerId]);
 
-  // Load initial question when game starts
   useEffect(() => {
     if (
       room?.game_state === "playing" &&
@@ -167,7 +161,6 @@ export default function RoomPage() {
     }
   }, [room, currentQuestion, isLoadingQuestion]);
 
-  // Start cooperation timer when conditions are met
   useEffect(() => {
     if (
       room?.game_state === "playing" &&
@@ -181,7 +174,6 @@ export default function RoomPage() {
     }
   }, [room, cooperationChallenge, cooperationTimerActive, playerId]);
 
-  // Initialize socket connection
   useEffect(() => {
     if (!roomId || !playerId || !playerName) return;
 
@@ -685,20 +677,37 @@ export default function RoomPage() {
       return;
     }
 
+    // Validate payload fields
+    const payload = {
+      categoryId: cooperationChallenge.categoryId,
+      answer: cooperationAnswer.trim(),
+      language: cooperationChallenge.language,
+      usedWords: Array.isArray(room.used_words) ? room.used_words : []
+    };
+
+    if (!payload.categoryId || !payload.language) {
+      console.error("❌ Invalid payload fields:", {
+        categoryId: payload.categoryId,
+        language: payload.language
+      });
+      setError("Invalid challenge data. Please try again.");
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    console.log("📡 Sending cooperation answer payload:", payload);
+
     try {
       const response = await fetch('/api/validate-cooperation-answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          categoryId: cooperationChallenge.categoryId,
-          answer: cooperationAnswer.trim(),
-          language: cooperationChallenge.language,
-          usedWords: room.used_words || []
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.message || `HTTP ${response.status}: ${response.statusText}`;
+        throw new Error(errorMessage);
       }
 
       const result = await response.json();
@@ -724,7 +733,8 @@ export default function RoomPage() {
       }
     } catch (error) {
       console.error("❌ Error validating cooperation answer:", error);
-      setError(`Failed to validate answer: ${error.message || 'Unknown error'}`);
+      const errorMessage = error.message || 'Unknown error';
+      setError(`Failed to validate answer: ${errorMessage}`);
       setTimeout(() => setError(null), 3000);
     }
   };
