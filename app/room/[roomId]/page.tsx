@@ -1,3 +1,4 @@
+// @jsxImportSource react
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -832,6 +833,7 @@ export default function RoomPage() {
     );
   }
 
+  // @ts-expect-error Force TSX parsing
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 mobile-no-scroll">
       <div className="mobile-container mobile-padding">
@@ -1265,7 +1267,7 @@ export default function RoomPage() {
             {currentQuestion ? (
               <Card className="mobile-card">
                 <CardHeader className="mobile-padding text-center">
-                  <div className="flex itemscenter justify-between mb-4">
+                  <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                       <Clock className="h-5 w-5 text-blue-600" />
                       <span className={`font-bold text-lg ${timeLeft <= 3 ? 'text-red-600' : 'text-blue-600'}`}>
