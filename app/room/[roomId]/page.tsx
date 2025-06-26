@@ -259,7 +259,7 @@ export default function RoomPage() {
             console.log("✅ Joined room successfully:", response.room);
             setRoom(response.room);
             setIsLoading(false);
-          }
+          };
         });
       }
     });
@@ -706,7 +706,17 @@ export default function RoomPage() {
 
   // Handle cooperation answer submission
   const handleCooperationAnswer = async () => {
-    if (!cooperationChallenge || !cooperationAnswer.trim()) return;
+    if (!cooperationChallenge || !cooperationAnswer.trim() || !room || !socket) {
+      console.error("❌ Missing required data for cooperation answer:", {
+        hasChallenge: !!cooperationChallenge,
+        hasAnswer: !!cooperationAnswer.trim(),
+        hasRoom: !!room,
+        hasSocket: !!socket
+      });
+      setError("Unable to submit answer: Missing game data");
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
 
     try {
       const response = await fetch('/api/validate-cooperation-answer', {
@@ -716,9 +726,13 @@ export default function RoomPage() {
           categoryId: cooperationChallenge.categoryId,
           answer: cooperationAnswer.trim(),
           language: cooperationChallenge.language,
-          usedWords: room?.used_words || []
+          usedWords: room.used_words || []
         })
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
 
       const result = await response.json();
 
@@ -727,7 +741,7 @@ export default function RoomPage() {
         audio.playSuccess();
         stopCooperationTimer();
         
-        socket?.emit("cooperation-answer", {
+        socket.emit("cooperation-answer", {
           roomId,
           playerId,
           data: {
@@ -739,13 +753,13 @@ export default function RoomPage() {
         });
       } else {
         // Wrong answer or already used
-        console.log("❌ Cooperation answer result:", result.message);
-        setError(result.message);
+        console.log("❌ Cooperation answer result:", result.message || "Invalid or used word");
+        setError(result.message || "Invalid or previously used word");
         setTimeout(() => setError(null), 3000);
       }
     } catch (error) {
       console.error("❌ Error validating cooperation answer:", error);
-      setError("Failed to validate answer");
+      setError(`Failed to validate answer: ${error.message || 'Unknown error'}`);
       setTimeout(() => setError(null), 3000);
     }
   };
@@ -1525,9 +1539,9 @@ export default function RoomPage() {
                       </div>
                     </div>
                   ))}
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
           </div>
         )}
 
