@@ -14,7 +14,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       return res.status(400).json({ error: 'Category ID, answer, and language are required' })
     }
 
-    if (!["french", "german", "russian", "japanese", "spanish"].includes(language)) {
+    if (!["french", "german", "russian", "japanese", "spanish", "english"].includes(language)) {
       return res.status(400).json({ error: 'Invalid language' })
     }
 

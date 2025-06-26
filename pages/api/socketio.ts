@@ -851,16 +851,65 @@ async function startCooperationChallenge(roomId: string, io: SocketIOServer) {
     const randomCategory = categories[Math.floor(Math.random() * categories.length)]
     
     const categoryTranslations = {
-      colors: { french: "Couleurs", spanish: "Colores", german: "Farben", japanese: "色", russian: "Цвета" },
-      animals: { french: "Animaux", spanish: "Animales", german: "Tiere", japanese: "動物", russian: "Животные" },
-      food: { french: "Nourriture", spanish: "Comida", german: "Essen", japanese: "食べ物", russian: "Еда" },
-      vehicles: { french: "Véhicules", spanish: "Vehículos", german: "Fahrzeuge", japanese: "乗り物", russian: "Транспорт" },
-      clothing: { french: "Vêtements", spanish: "Ropa", german: "Kleidung", japanese: "服", russian: "Одежда" },
-      sports: { french: "Sports", spanish: "Deportes", german: "Sport", japanese: "スポーツ", russian: "Спорт" },
-      household: { french: "Objets ménagers", spanish: "Artículos del hogar", german: "Haushaltsgegenstände", japanese: "家庭用品", russian: "Предметы быта" }
+      colors: { 
+        english: "Colors",
+        french: "Couleurs", 
+        spanish: "Colores", 
+        german: "Farben", 
+        japanese: "色", 
+        russian: "Цвета" 
+      },
+      animals: { 
+        english: "Animals",
+        french: "Animaux", 
+        spanish: "Animales", 
+        german: "Tiere", 
+        japanese: "動物", 
+        russian: "Животные" 
+      },
+      food: { 
+        english: "Food",
+        french: "Nourriture", 
+        spanish: "Comida", 
+        german: "Essen", 
+        japanese: "食べ物", 
+        russian: "Еда" 
+      },
+      vehicles: { 
+        english: "Vehicles",
+        french: "Véhicules", 
+        spanish: "Vehículos", 
+        german: "Fahrzeuge", 
+        japanese: "乗り物", 
+        russian: "Транспорт" 
+      },
+      clothing: { 
+        english: "Clothing",
+        french: "Vêtements", 
+        spanish: "Ropa", 
+        german: "Kleidung", 
+        japanese: "服", 
+        russian: "Одежда" 
+      },
+      sports: { 
+        english: "Sports",
+        french: "Sports", 
+        spanish: "Deportes", 
+        german: "Sport", 
+        japanese: "スポーツ", 
+        russian: "Спорт" 
+      },
+      household: { 
+        english: "Household Items",
+        french: "Objets ménagers", 
+        spanish: "Artículos del hogar", 
+        german: "Haushaltsgegenstände", 
+        japanese: "家庭用品", 
+        russian: "Предметы быта" 
+      }
     }
 
-    const translatedName = categoryTranslations[randomCategory]?.[challengeLanguage] || randomCategory
+    const translatedName = categoryTranslations[randomCategory]?.[challengeLanguage] || randomCategory.charAt(0).toUpperCase() + randomCategory.slice(1)
 
     const challenge = {
       categoryId: randomCategory,

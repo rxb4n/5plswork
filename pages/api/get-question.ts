@@ -198,23 +198,45 @@ interface Question {
   options: string[];
 }
 
-function generateQuestion(language: "french" | "german" | "russian" | "japanese" | "spanish"): Question {
+function generateQuestion(language: "french" | "german" | "russian" | "japanese" | "spanish" | "english"): Question {
   console.log(`🎯 API: Generating question for ${language}`)
   
   // Validate language
-  if (!["french", "german", "russian", "japanese", "spanish"].includes(language)) {
+  if (!["french", "german", "russian", "japanese", "spanish", "english"].includes(language)) {
     console.error(`❌ API: Invalid language: ${language}`)
     throw new Error(`Invalid language: ${language}`)
   }
 
-  // Select random word
-  const randomWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)]
-  console.log(`📝 API: Selected word:`, randomWord)
+  // For English, we need to reverse the logic - show foreign word, answer in English
+  let questionWord: any
+  let correctAnswer: string
+  let englishWord: string
+
+  if (language === "english") {
+    // For English mode: show a foreign word, answer in English
+    const foreignLanguages = ["french", "german", "russian", "japanese", "spanish"]
+    const randomForeignLanguage = foreignLanguages[Math.floor(Math.random() * foreignLanguages.length)]
+    
+    questionWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)]
+    correctAnswer = questionWord.english
+    englishWord = questionWord[randomForeignLanguage] // Show foreign word as the question
+    
+    console.log(`📝 API: Selected word for English mode:`, {
+      questionLanguage: randomForeignLanguage,
+      questionText: englishWord,
+      correctAnswer: correctAnswer
+    })
+  } else {
+    // For other languages: show English word, answer in target language
+    questionWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)]
+    correctAnswer = questionWord[language]
+    englishWord = questionWord.english
+    
+    console.log(`📝 API: Selected word for ${language}:`, questionWord)
+  }
   
-  // Get correct answer
-  const correctAnswer = randomWord[language]
   if (!correctAnswer) {
-    console.error(`❌ API: No translation found for ${language} in word:`, randomWord)
+    console.error(`❌ API: No translation found for ${language} in word:`, questionWord)
     throw new Error(`No translation found for ${language}`)
   }
 
@@ -226,7 +248,13 @@ function generateQuestion(language: "french" | "german" | "russian" | "japanese"
   while (wrongAnswers.length < 3 && attempts < maxAttempts) {
     attempts++
     const randomWrongWord = WORD_DATABASE[Math.floor(Math.random() * WORD_DATABASE.length)]
-    const wrongAnswer = randomWrongWord[language]
+    
+    let wrongAnswer: string
+    if (language === "english") {
+      wrongAnswer = randomWrongWord.english
+    } else {
+      wrongAnswer = randomWrongWord[language]
+    }
     
     if (wrongAnswer && wrongAnswer !== correctAnswer && !wrongAnswers.includes(wrongAnswer)) {
       wrongAnswers.push(wrongAnswer)
@@ -244,14 +272,14 @@ function generateQuestion(language: "french" | "german" | "russian" | "japanese"
   // Create question object
   const question: Question = {
     questionId: `q-api-${language}-${questionCounter++}-${Date.now()}`,
-    english: randomWord.english,
+    english: englishWord, // This will be the foreign word for English mode
     correctAnswer,
     options,
   }
 
   console.log(`✅ API: Generated question:`, {
     questionId: question.questionId,
-    english: question.english,
+    questionText: question.english,
     language: language,
     correctAnswer: question.correctAnswer,
     options: question.options,
@@ -273,7 +301,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       return res.status(400).json({ error: 'Language is required' })
     }
 
-    if (!["french", "german", "russian", "japanese", "spanish"].includes(language)) {
+    if (!["french", "german", "russian", "japanese", "spanish", "english"].includes(language)) {
       return res.status(400).json({ error: 'Invalid language' })
     }
 

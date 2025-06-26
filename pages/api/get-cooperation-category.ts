@@ -14,7 +14,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       return res.status(400).json({ error: 'Language is required' })
     }
 
-    if (!["french", "german", "russian", "japanese", "spanish"].includes(language)) {
+    if (!["french", "german", "russian", "japanese", "spanish", "english"].includes(language)) {
       return res.status(400).json({ error: 'Invalid language' })
     }
 
@@ -24,6 +24,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     // Language-specific category names
     const categoryTranslations = {
       colors: {
+        english: "Colors",
         french: "Couleurs",
         spanish: "Colores", 
         german: "Farben",
@@ -31,6 +32,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         russian: "Цвета"
       },
       animals: {
+        english: "Animals",
         french: "Animaux",
         spanish: "Animales",
         german: "Tiere", 
@@ -38,6 +40,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         russian: "Животные"
       },
       food: {
+        english: "Food",
         french: "Nourriture",
         spanish: "Comida",
         german: "Essen",
@@ -45,6 +48,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         russian: "Еда"
       },
       vehicles: {
+        english: "Vehicles",
         french: "Véhicules",
         spanish: "Vehículos",
         german: "Fahrzeuge",
@@ -52,6 +56,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         russian: "Транспорт"
       },
       clothing: {
+        english: "Clothing",
         french: "Vêtements", 
         spanish: "Ropa",
         german: "Kleidung",
@@ -59,6 +64,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         russian: "Одежда"
       },
       sports: {
+        english: "Sports",
         french: "Sports",
         spanish: "Deportes", 
         german: "Sport",
@@ -66,6 +72,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         russian: "Спорт"
       },
       household: {
+        english: "Household Items",
         french: "Objets ménagers",
         spanish: "Artículos del hogar",
         german: "Haushaltsgegenstände", 

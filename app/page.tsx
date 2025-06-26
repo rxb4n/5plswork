@@ -491,7 +491,7 @@ export default function HomePage() {
                 <div className="mobile-spacing-sm">
                   <p className="font-medium mobile-text-base">🌍 Languages:</p>
                   <div className="mobile-flex-wrap">
-                    {["French", "German", "Russian", "Japanese", "Spanish", "English"].map((lang) => (
+                    {["English", "French", "German", "Russian", "Japanese", "Spanish"].map((lang) => (
                       <Badge key={lang} variant="outline" className="mobile-text-sm">
                         {lang}
                       </Badge>

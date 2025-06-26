@@ -28,7 +28,7 @@ export interface Question {
 export interface Player {
   id: string;
   name: string;
-  language: "french" | "german" | "russian" | "japanese" | "spanish" | null;
+  language: "french" | "german" | "russian" | "japanese" | "spanish" | "english" | null;
   ready: boolean;
   score: number;
   is_host: boolean;
@@ -41,7 +41,7 @@ export interface Room {
   players: Player[];
   game_state: "lobby" | "playing" | "finished";
   game_mode: "practice" | "competition" | "cooperation" | null;
-  host_language: "french" | "german" | "russian" | "japanese" | "spanish" | null;
+  host_language: "french" | "german" | "russian" | "japanese" | "spanish" | "english" | null;
   winner_id?: string;
   last_activity: Date;
   created_at: Date;
