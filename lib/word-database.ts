@@ -4213,17 +4213,18 @@ export const WORD_DATABASE: WordEntry[] = [
     difficulty: "medium"
   },
   {
-    id: "vehicle_049",
-    english: "Bulldozer",
-    french: "Bulldozer",
-    spanish: "Bulldozer",
-    german: "Bulldozer",
-    japanese: "Burudōzā",
-    russian: "бульдозер",
-    category: "vehicles",
-    isCognate: true,
-    difficulty: "hard"
-  },
+    {
+      id: "vehicle_049",
+      english: "Monorail",
+      french: "Monorail",
+      spanish: "Monorraíl",
+      german: "Einschienenbahn",
+      japanese: "Monorēru",
+      russian: "монорельс",
+      category: "vehicles",
+      isCognate: true,
+      difficulty: "hard"
+    },
   {
     id: "vehicle_050",
     english: "Horse-drawn cart",
